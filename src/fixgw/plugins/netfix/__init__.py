@@ -68,6 +68,9 @@ class Connection(object):
             st = "{0};{1};{2}{3}{4}{5}{6}\n".format(id, value[0], a, o, b, f, s)
         else:
             st = "{0};{1}\n".format(id, value)
+        self.log.info(
+            "Sending: {0}".format(st.encode().strip())
+        )
         self.queue.put(st.encode())
 
     def __send_report(self, id):
@@ -322,6 +325,10 @@ class ReceiveThread(threading.Thread):
                     self.log.debug("Bad Message from {0}".format(self.addr[0]))
                 for d in dstring:
                     if d == "\n":
+                        self.log.info(
+                            "Handle: {0}".format(buff.strip())
+                        )
+
                         self.co.handle_request(buff)
                         self.msg_recv += 1
                         buff = ""

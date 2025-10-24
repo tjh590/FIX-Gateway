@@ -72,7 +72,7 @@ class PluginBase(object):
         return database.read(key)
 
     def db_write(self, key, value):
-        database.write(key, value)
+        database.write(key, value, self.name)
 
     def db_list(self):
         return database.listkeys()

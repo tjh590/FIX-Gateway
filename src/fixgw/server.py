@@ -135,6 +135,14 @@ def merge_dict(dest, override):
         else:
             dest[k] = override[k]
 
+def _log_db_write(key, value, _):
+    payload = value[0] if isinstance(value, tuple) else value
+    if log:
+        log.debug("DB write: %s -> %s", key, payload)
+class MicrosecondFormatter(logging.Formatter):
+    def formatTime(self, record, datefmt=None):
+        ts = datetime.datetime.fromtimestamp(record.created)
+        return ts.strftime(datefmt) if datefmt else ts.strftime("%H:%M:%S.%f")
 
 def main_setup():
     global config_path
@@ -216,6 +224,10 @@ def main_setup():
     else:
         logging.basicConfig()
 
+    formatter = MicrosecondFormatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    for handler in logging.getLogger().handlers:
+        handler.setFormatter(formatter)
+
     log = logging.getLogger("fixgw")
     if args.verbose:
         log.setLevel(logging.INFO)
@@ -246,6 +258,24 @@ def main_setup():
     dbfile = config["database file"].format(CONFIG=config_path)
     try:
         database.init(dbfile)
+        _db_write = database.write
+
+        def logging_write(key, value, *args, **kwargs):
+            src = kwargs.pop("source", None)
+            extra_args = args
+            if src is None and extra_args:
+                src = extra_args[0]
+                extra_args = extra_args[1:]
+            payload = value[0] if isinstance(value, tuple) else value
+            if log and log.isEnabledFor(logging.DEBUG):
+                if src:
+                    log.debug("DB write[%s]: %s -> %s", src, key, payload)
+                else:
+                    log.debug("DB write: %s -> %s", key, payload)
+            return _db_write(key, value, *extra_args, **kwargs)
+
+        database.write = logging_write
+    #    database.callback_add("ted", "*", _log_db_write, None)
     except Exception as e:
         log.error("Database failure, Exiting:" + str(e))
         raise
