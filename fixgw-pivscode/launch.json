@@ -1,0 +1,23 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "fixGw - Debug",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/fixGw.py",
+      "console": "integratedTerminal",
+      "args": ["-d", "-v"],
+      "justMyCode": true
+    },
+    {
+      "name": "fixGwClient - Debug",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/fixGwClient.py",
+      "console": "integratedTerminal",
+      "args": ["-h"],
+      "justMyCode": true
+    }
+  ]
+}
