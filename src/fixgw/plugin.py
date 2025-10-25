@@ -71,8 +71,8 @@ class PluginBase(object):
     def db_read(self, key):
         return database.read(key)
 
-    def db_write(self, key, value):
-        database.write(key, value, self.name)
+    def db_write(self, key, value, timestamp=None):
+        database.write(key, value, source=self.name, timestamp=timestamp)
 
     def db_list(self):
         return database.listkeys()

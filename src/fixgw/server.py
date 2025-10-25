@@ -261,18 +261,41 @@ def main_setup():
         _db_write = database.write
 
         def logging_write(key, value, *args, **kwargs):
-            src = kwargs.pop("source", None)
-            extra_args = args
-            if src is None and extra_args:
-                src = extra_args[0]
-                extra_args = extra_args[1:]
+            source = kwargs.pop("source", None)
+            timestamp = kwargs.pop("timestamp", None)
+            remaining = list(args)
+            leftover = []
+            while remaining:
+                candidate = remaining.pop(0)
+                if source is None and isinstance(candidate, str):
+                    source = candidate
+                    continue
+                if timestamp is None and isinstance(candidate, (int, float)):
+                    timestamp = candidate
+                    continue
+                if source is None:
+                    source = candidate
+                    continue
+                if timestamp is None:
+                    timestamp = candidate
+                    continue
+                leftover.append(candidate)
+            if leftover:
+                raise TypeError(
+                    "database.write() wrapper received unexpected positional arguments: {}".format(
+                        leftover
+                    )
+                )
+
             payload = value[0] if isinstance(value, tuple) else value
             if log and log.isEnabledFor(logging.DEBUG):
-                if src:
-                    log.debug("DB write[%s]: %s -> %s", src, key, payload)
+                if source:
+                    log.debug("DB write[%s]: %s -> %s", source, key, payload)
                 else:
                     log.debug("DB write: %s -> %s", key, payload)
-            return _db_write(key, value, *extra_args, **kwargs)
+            return _db_write(
+                key, value, source=source, timestamp=timestamp, **kwargs
+            )
 
         database.write = logging_write
     #    database.callback_add("ted", "*", _log_db_write, None)

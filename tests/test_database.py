@@ -822,6 +822,26 @@ class TestDatabase(unittest.TestCase):
             x = database.read("AOA." + test[0])
             self.assertEqual(x, test[1])
 
+    def test_write_tracks_source_and_rate_stats(self):
+        sf = io.StringIO(minimal_config)
+        database.init(sf)
+        database.write("ANLG1", 0.0, source="pluginA", timestamp=1.0)
+        database.write("ANLG1", 1.0, source="pluginA", timestamp=2.0)
+        database.write("ANLG1", 2.0, source="pluginB", timestamp=4.0)
+
+        item = database.get_raw_item("ANLG1")
+        self.assertEqual(item.last_writer, "pluginB")
+        self.assertEqual(database.get_last_writer("ANLG1"), "pluginB")
+
+        stats = item.get_rate_stats()
+        self.assertIsNotNone(stats)
+        self.assertEqual(stats["last_writer"], "pluginB")
+        self.assertEqual(stats["samples"], 2)
+        self.assertAlmostEqual(stats["min"], 0.5, places=6)
+        self.assertAlmostEqual(stats["max"], 1.0, places=6)
+        self.assertAlmostEqual(stats["avg"], 0.75, places=6)
+        self.assertAlmostEqual(stats["stdev"], 0.25, places=6)
+
     def test_database_bounds(self):
         """Test database bounds checking"""
         sf = io.StringIO(general_config)

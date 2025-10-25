@@ -15,6 +15,7 @@
 #  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 
 import logging
+import math
 import threading
 import time
 import copy
@@ -60,6 +61,13 @@ class db_item(object):
         self.aux = {}
         self.callbacks = []
         self.lock = threading.Lock()
+        self.last_writer = None
+        self._last_update_time = None
+        self._rate_min = None
+        self._rate_max = None
+        self._rate_sum = 0.0
+        self._rate_sum_sq = 0.0
+        self._rate_samples = 0
 
     # initialize the auxiliary data dictionary.  aux should be a comma delimited
     # string of the items to include.
@@ -175,6 +183,38 @@ class db_item(object):
                     # set the timestamp to right now
             self.timestamp = time.time()
         self.send_callbacks()
+
+    def record_write(self, writer=None, when=None):
+        if when is None:
+            when = time.time()
+        with self.lock:
+            prev = self._last_update_time
+            self._last_update_time = when
+            self.last_writer = writer
+            if prev is None or when <= prev:
+                return
+            rate = 1.0 / (when - prev)
+            self._rate_samples += 1
+            self._rate_sum += rate
+            self._rate_sum_sq += rate * rate
+            self._rate_min = rate if self._rate_min is None else min(self._rate_min, rate)
+            self._rate_max = rate if self._rate_max is None else max(self._rate_max, rate)
+
+    def get_rate_stats(self):
+        with self.lock:
+            if self._rate_samples == 0:
+                return None
+            avg = self._rate_sum / self._rate_samples
+            variance = (self._rate_sum_sq / self._rate_samples) - (avg * avg)
+            stdev = math.sqrt(variance) if variance > 0 else 0.0
+            return {
+                "min": self._rate_min,
+                "max": self._rate_max,
+                "avg": avg,
+                "stdev": stdev,
+                "samples": self._rate_samples,
+                "last_writer": self.last_writer,
+            }
 
     @property
     def min(self):
@@ -369,14 +409,44 @@ def init(f):
 
 
 # These are the public functions for interacting with the database
-def write(key, value):
+def write(key, value, *args, source=None, timestamp=None):
+    # Backward compatibility for positional source/timestamp parameters
+    remaining = list(args)
+    leftover = []
+    while remaining:
+        candidate = remaining.pop(0)
+        if source is None and isinstance(candidate, str):
+            source = candidate
+            continue
+        if timestamp is None and isinstance(candidate, (int, float)):
+            timestamp = candidate
+            continue
+        if source is None:
+            source = candidate
+            continue
+        if timestamp is None:
+            timestamp = candidate
+            continue
+        leftover.append(candidate)
+    if leftover:
+        raise TypeError(
+            "write() received unexpected positional arguments: {}".format(leftover)
+        )
+
     if "." in key:
-        x = key.split(".")
-        entry = __database[x[0]]
-        entry.set_aux_value(x[1], value)
+        ident, aux = key.split(".", 1)
+        entry = __database[ident]
+        entry.set_aux_value(aux, value)
+        when = timestamp if timestamp is not None else time.time()
+        entry.record_write(writer=source, when=when)
     else:
         entry = __database[key]
         entry.value = value
+        if timestamp is not None:
+            with entry.lock:
+                entry.timestamp = timestamp
+        when = timestamp if timestamp is not None else entry.timestamp
+        entry.record_write(writer=source, when=when)
 
 
 def read(key):
@@ -390,6 +460,14 @@ def read(key):
 
 def get_raw_item(key):
     return __database[key]
+
+
+def get_last_writer(key):
+    return __database[key].last_writer
+
+
+def get_rate_stats(key):
+    return __database[key].get_rate_stats()
 
 
 def listkeys():
