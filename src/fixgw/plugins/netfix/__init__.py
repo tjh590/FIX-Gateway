@@ -83,8 +83,45 @@ class Connection(object):
                 if len(a) > 0:
                     a = a + ","
                 a = a + each
-            s = "@q{0};{1};{2};{3};{4};{5};{6};{7}\n".format(
-                id, x.description, x.typestring, x.min, x.max, x.units, x.tol, a
+
+            stats = x.get_rate_stats()
+            last_writer = ""
+            rate_min = ""
+            rate_max = ""
+            rate_avg = ""
+            rate_stdev = ""
+            rate_samples = "0"
+            if stats:
+                if stats.get("last_writer"):
+                    last_writer = str(stats["last_writer"])
+                if stats.get("min") is not None:
+                    rate_min = "{:.6f}".format(stats["min"])
+                if stats.get("max") is not None:
+                    rate_max = "{:.6f}".format(stats["max"])
+                if stats.get("avg") is not None:
+                    rate_avg = "{:.6f}".format(stats["avg"])
+                if stats.get("stdev") is not None:
+                    rate_stdev = "{:.6f}".format(stats["stdev"])
+                if stats.get("samples") is not None:
+                    rate_samples = str(stats["samples"])
+            elif x.last_writer:
+                last_writer = str(x.last_writer)
+
+            s = "@q{0};{1};{2};{3};{4};{5};{6};{7};{8};{9};{10};{11};{12};{13}\n".format(
+                id,
+                x.description,
+                x.typestring,
+                x.min,
+                x.max,
+                x.units,
+                x.tol,
+                a,
+                last_writer,
+                rate_min,
+                rate_max,
+                rate_avg,
+                rate_stdev,
+                rate_samples,
             )
             self.queue.put(s.encode())
         except KeyError:

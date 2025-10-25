@@ -38,6 +38,7 @@ class QtDB_Item(QObject):
     auxChanged = pyqtSignal(str, object)
     reportReceived = pyqtSignal(bool)
     destroyed = pyqtSignal()
+    statsChanged = pyqtSignal(dict)
 
     def __init__(self, key, item):
         super(QtDB_Item, self).__init__()
@@ -57,6 +58,7 @@ class QtDB_Item(QObject):
         item.auxChanged = self.auxChangedFunc
         item.reportReceived = self.reportReceivedFunc
         item.destroyed = self.destroyedFunc
+        item.statsChanged = self.statsChangedFunc
 
     def valueChangedFunc(self, value):
         self.valueChanged.emit(value)
@@ -87,6 +89,9 @@ class QtDB_Item(QObject):
 
     def destroyedFunc(self):
         self.destroyed.emit()
+
+    def statsChangedFunc(self, stats):
+        self.statsChanged.emit(stats)
 
     def __str__(self):
         s = "{} = {}".format(self.key, self._value)
@@ -198,6 +203,36 @@ class QtDB_Item(QObject):
 
     def get_aux_value(self, name):
         return self._item.get_aux_value(name)
+
+    def getLastWriter(self):
+        return self._item.last_writer
+
+    last_writer = property(getLastWriter)
+
+    def getRateMin(self):
+        return self._item.rate_min
+
+    rate_min = property(getRateMin)
+
+    def getRateMax(self):
+        return self._item.rate_max
+
+    rate_max = property(getRateMax)
+
+    def getRateAvg(self):
+        return self._item.rate_avg
+
+    rate_avg = property(getRateAvg)
+
+    def getRateStdev(self):
+        return self._item.rate_stdev
+
+    rate_stdev = property(getRateStdev)
+
+    def getRateSamples(self):
+        return self._item.rate_samples
+
+    rate_samples = property(getRateSamples)
 
 
 class Database(object):

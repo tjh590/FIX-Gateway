@@ -29,7 +29,7 @@ log = logging.getLogger(__name__)
 
 # This class represents a single data point in the database.
 class DB_Item(object):
-    def __init__(self, client, key, dtype="float"):
+    def __init__(self, client, key, dtype="float", database=None):
         super(DB_Item, self).__init__()
         if key is None:
             raise ValueError("Trying to create a Null Item")
@@ -37,6 +37,7 @@ class DB_Item(object):
         self.supressWrite = True  # Keeps us from writing to the server
         self.dtype = dtype
         self.key = key
+        self.database = database
         self._value = 0.0
         self.description = ""
         self._units = ""
@@ -56,6 +57,13 @@ class DB_Item(object):
         self.is_subscribed = False
         self.client = client
         self.supressWrite = False
+        self.last_writer = None
+        self.rate_min = None
+        self.rate_max = None
+        self.rate_avg = None
+        self.rate_stdev = None
+        self.rate_samples = 0
+        self.stats_dirty = False
 
         # Callback Functions
         self.valueChanged = None
@@ -68,6 +76,7 @@ class DB_Item(object):
         self.auxChanged = None
         self.reportReceived = None
         self.destroyed = None
+        self.statsChanged = None
 
         log.debug("Creating Item {0}".format(key))
 
@@ -216,6 +225,9 @@ class DB_Item(object):
             self.fail = vals[2][3]
             self.secFail = vals[2][4]
             self.supressWrite = False
+            self.stats_dirty = True
+            if self.database is not None:
+                self.database.mark_stats_dirty(self.key)
 
     @property
     def dtype(self):
@@ -416,6 +428,47 @@ class DB_Item(object):
                 raise
             finally:
                 self.supressWrite = False
+            self.stats_dirty = True
+        if self.database is not None:
+            self.database.mark_stats_dirty(self.key)
+
+    def update_stats_from_report(self, rep):
+        stats_dict = {
+            "last_writer": rep.last_writer,
+            "min": rep.rate_min,
+            "max": rep.rate_max,
+            "avg": rep.rate_avg,
+            "stdev": rep.rate_stdev,
+            "samples": rep.rate_samples if rep.rate_samples is not None else 0,
+        }
+
+        current = (
+            self.last_writer,
+            self.rate_min,
+            self.rate_max,
+            self.rate_avg,
+            self.rate_stdev,
+            self.rate_samples,
+        )
+        new = (
+            stats_dict["last_writer"],
+            stats_dict["min"],
+            stats_dict["max"],
+            stats_dict["avg"],
+            stats_dict["stdev"],
+            stats_dict["samples"],
+        )
+
+        self.last_writer = stats_dict["last_writer"]
+        self.rate_min = stats_dict["min"]
+        self.rate_max = stats_dict["max"]
+        self.rate_avg = stats_dict["avg"]
+        self.rate_stdev = stats_dict["stdev"]
+        self.rate_samples = stats_dict["samples"]
+        self.stats_dirty = False
+
+        if current != new and self.statsChanged is not None:
+            self.statsChanged(stats_dict)
 
 
 class UpdateThread(threading.Thread):
@@ -444,6 +497,9 @@ class Database(object):
         self.client = client
         self.init_event = threading.Event()
         self.connected = False
+        self._stats_lock = threading.Lock()
+        self._stats_dirty = set()
+        self._max_stats_refresh = 20
         if self.client.isConnected():
             self.initialize()
             self.connected = True
@@ -477,9 +533,29 @@ class Database(object):
                 if item.destroyed is not None:
                     item.destroyed()
             self.__items = {}
+            with self._stats_lock:
+                self._stats_dirty.clear()
         else:
-            # Do some maintenance stuff
-            pass
+            if not self.connected:
+                return
+
+            keys_to_refresh = []
+            with self._stats_lock:
+                while self._stats_dirty and len(keys_to_refresh) < self._max_stats_refresh:
+                    keys_to_refresh.append(self._stats_dirty.pop())
+
+            for key in keys_to_refresh:
+                item = self.__items.get(key)
+                if item is None:
+                    continue
+                try:
+                    response = self.client.getReport(key)
+                    report = fixgw.netfix.Report(response)
+                    item.update_stats_from_report(report)
+                except Exception as exc:
+                    log.debug("Unable to refresh stats for %s: %s", key, exc)
+                    with self._stats_lock:
+                        self._stats_dirty.add(key)
 
     # This callback gets a data update sentence from the server
     def dataFunction(self, x):
@@ -499,6 +575,8 @@ class Database(object):
             log.warning("Trying to initialize an already initialized database")
             return
         try:
+            with self._stats_lock:
+                self._stats_dirty.clear()
             keys = self.client.getList()
             for key in keys:
                 res = self.client.getReport(key)
@@ -528,8 +606,9 @@ class Database(object):
         if key in self.__items:
             log.debug("Redefining Item {0}".format(key))
             item = self.__items[key]
+            item.database = self
         else:
-            item = DB_Item(self.client, key, rep.dtype)
+            item = DB_Item(self.client, key, rep.dtype, self)
         item.dtype = rep.dtype
         item.description = rep.desc
         item.min = rep.min
@@ -537,6 +616,9 @@ class Database(object):
         item.units = rep.units
         item.tol = rep.tol
         item.init_aux(rep.aux)
+        item.update_stats_from_report(rep)
+        with self._stats_lock:
+            self._stats_dirty.discard(key)
 
         # Send a read command to the server to get initial data
         res = self.client.read(key)
@@ -558,10 +640,12 @@ class Database(object):
         if wait:
             self.init_event.wait()
         try:
-            return self.__items[key]
+            item = self.__items[key]
+            item.database = self
+            return item
         except KeyError:
             if create:
-                newitem = DB_Item(self.client, key)
+                newitem = DB_Item(self.client, key, database=self)
                 self.__items[key] = newitem
                 return newitem
             else:
@@ -583,3 +667,7 @@ class Database(object):
     def stop(self):
         self.timer.stop()
         self.timer.join()
+
+    def mark_stats_dirty(self, key):
+        with self._stats_lock:
+            self._stats_dirty.add(key)

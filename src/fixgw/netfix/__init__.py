@@ -56,6 +56,24 @@ class Report:
             for aux in x:
                 self.aux.append(aux)
 
+        def _as_float(value):
+            return float(value) if value not in ("", None) else None
+
+        def _as_int(value):
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return None
+
+        extras = res[8:] if len(res) > 8 else []
+        self.last_writer = extras[0] if len(extras) > 0 and extras[0] else None
+        self.rate_min = _as_float(extras[1]) if len(extras) > 1 else None
+        self.rate_max = _as_float(extras[2]) if len(extras) > 2 else None
+        self.rate_avg = _as_float(extras[3]) if len(extras) > 3 else None
+        self.rate_stdev = _as_float(extras[4]) if len(extras) > 4 else None
+        samples_value = extras[5] if len(extras) > 5 else None
+        self.rate_samples = _as_int(samples_value) if samples_value not in ("", None) else 0
+
     def __str__(self):
         return "{}:{}".format(self.desc, self.units)
 
