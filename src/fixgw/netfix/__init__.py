@@ -203,20 +203,25 @@ class ClientThread(threading.Thread):
         return self.connectedEvent.wait(timeout)
 
     def isConnected(self):
-        return self.connectedEvent.isSet()
+        return self.connectedEvent.is_set()
 
     def getResponse(self, c, timeout=1.0):
         # TODO Check for errors and report those as well
         if not self.isConnected():
             raise ResponseError("Not Connected to Server")
-        try:
-            x = self.cmdqueue.get(timeout=1.0)
-            while x[0] != c:
-                x = self.cmdqueue.get(timeout=1.0)
-            return x
-        except queue.Empty:
-            raise ResponseError("Timeout waiting on data")
-
+        # Honor the caller's timeout budget
+        deadline = time.time() + timeout
+        while True:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                raise ResponseError("Timeout waiting on data")
+            try:
+                x = self.cmdqueue.get(timeout=remaining)
+            except queue.Empty:
+                raise ResponseError("Timeout waiting on data")
+            if x[0] == c:
+                return x
+            
     def send(self, s):
         if not self.isConnected():
             raise NotConnectedError("Not Connected to Server")
@@ -278,21 +283,23 @@ class Client:
         self.cthread.connectCallback = None
 
     def getList(self):
+        # Request list and read fragments until the server indicates end.
         with self.lock:
-            self.cthread.send("@l{}\n".format(id).encode())
+            self.cthread.send("@l\n".encode())
             total = []
-            # Need to loop over multiple responses
-            done = False
-            while not done:
+            while True:
                 try:
-                    res = self.cthread.getResponse("l")
-                    a = res[1].split(";")
-                    # print(f"###############\n{a[2].split(',')}")
-                    total = total + a[2].split(",")
-                except:
-                    done = True
-        return total
-
+                    res = self.cthread.getResponse("l", timeout=self.cthread.timeout)
+                except ResponseError:
+                    # No more fragments (or server slow) -> stop gracefully
+                    break
+                parts = res[1].split(";")
+                # parts[2] is a comma-separated chunk; blank or short means done
+                if len(parts) < 3 or not parts[2]:
+                    break
+                total.extend([k for k in parts[2].split(",") if k])
+            return total
+        
     def getReport(self, id):
         with self.lock:
             self.cthread.send("@q{}\n".format(id).encode())

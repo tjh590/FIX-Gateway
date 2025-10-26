@@ -580,7 +580,7 @@ class ClientThread(threading.Thread):
         connected = 0
         disconnected = 0
         for c in self.clients:
-            if c.isConnected:
+            if c.isConnected():
                 connected += 1
             else:
                 disconnected += 1
