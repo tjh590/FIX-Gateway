@@ -16,7 +16,7 @@
 
 # This is the FIX-Net client library for FIX-Gateway
 
-import threading
+import queue, threading
 import socket
 import logging
 import time
@@ -98,6 +98,10 @@ class ClientThread(threading.Thread):
         self.connectCallback = None
         self.dataCallback = None
 
+        self.dataqueue = queue.Queue(maxsize=5000)
+        self._dispatcher_stop = threading.Event()
+        self._dispatcher = threading.Thread(target=self._dispatch_loop, daemon=True)
+
     def connectedState(self, connected):
         if connected:
             self.connectedEvent.set()
@@ -116,23 +120,38 @@ class ClientThread(threading.Thread):
                 log.error("Bad Data Sentence Received")
             if len(x) == 3:
                 s = ""
-                if x[2][0] == "1":
-                    s += "a"
-                if x[2][1] == "1":
-                    s += "o"
-                if x[2][2] == "1":
-                    s += "b"
-                if x[2][3] == "1":
-                    s += "f"
-                if x[2][4] == "1":
-                    s += "s"
+                if x[2][0] == "1": s += "a"
+                if x[2][1] == "1": s += "o"
+                if x[2][2] == "1": s += "b"
+                if x[2][3] == "1": s += "f"
+                if x[2][4] == "1": s += "s"
                 x[2] = s
-            # self.dataqueue.put(x)
+            # Defer to dispatcher instead of calling dataCallback inline
+            try:
+                self.dataqueue.put_nowait(x)
+            except queue.Full:
+                log.debug("Dropping update due to backpressure")
+
+    def _dispatch_loop(self):
+        while not self._dispatcher_stop.is_set():
+            try:
+                x = self.dataqueue.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            if x is None:
+                break
             if self.dataCallback:
-                self.dataCallback(x)
+                try:
+                    self.dataCallback(x)
+                except Exception as e:
+                    log.error("dataCallback error: %s", e)
 
     def run(self):
         log.debug("ClientThread - Starting")
+
+        if not self._dispatcher.is_alive():
+            self._dispatcher.start()
+
         while True:
             self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -198,6 +217,11 @@ class ClientThread(threading.Thread):
 
     def stop(self):
         self.getout = True
+        self._dispatcher_stop.set()
+        try:
+            self.dataqueue.put_nowait(None)
+        except Exception:
+            pass
 
     def connectWait(self, timeout=1.0):
         return self.connectedEvent.wait(timeout)
@@ -310,6 +334,7 @@ class Client:
                     raise ResponseError("Key Not Found {}".format(e[0]))
                 else:
                     raise ResponseError("Response Error {} for {}".format(e[1], e[0]))
+            print("rpt:{0}".format(res[1]))
             a = res[1].split(";")
             return a
 
