@@ -24,6 +24,7 @@
 import fixgw.plugin as plugin
 from fixgw.database import read
 import fixgw.quorum as quorum
+from collections import OrderedDict
 
 # Determine pressure altitude
 # inputs: BARO, ALTMSL
@@ -713,6 +714,12 @@ class Plugin(plugin.PluginBase):
     #     """ The get_status method should return a dict or OrderedDict that
     #     is basically a key/value pair of statistics"""
     #     return OrderedDict({"Count":self.thread.count})
+    def get_status(self):
+        try:
+            count = len(self.thread.keylist) if getattr(self, "thread", None) else 0
+        except Exception:
+            count = 0
+        return OrderedDict({"Item Count": count})
 
 
 # TODO: Add a check for Warns and alarms and annunciate appropriatly

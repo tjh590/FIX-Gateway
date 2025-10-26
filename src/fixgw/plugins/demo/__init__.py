@@ -705,5 +705,13 @@ class Plugin(plugin.PluginBase):
         if self.thread.is_alive():
             raise plugin.PluginFail
 
+    #def get_status(self):
+    #    return self.status
     def get_status(self):
-        return self.status
+        """Return basic status for the demo connection."""
+        try:
+            count = len(self.thread.keylist) if getattr(self, "thread", None) else 0
+        except Exception:
+            count = 0
+        return OrderedDict({"Item Count": count})
+
