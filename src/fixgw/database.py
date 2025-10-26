@@ -21,8 +21,9 @@ import time
 import copy
 from fixgw import cfg
 
-__database = {}
+RATE_MAX_HZ = 100000.0  # ignore instantaneous rates above this
 
+__database = {}
 
 class UpdateThread(threading.Thread):
     def __init__(self, func, delay):
@@ -185,15 +186,23 @@ class db_item(object):
         self.send_callbacks()
 
     def record_write(self, writer=None, when=None):
+        # use a monotonic clock for Δt so wallclock jumps don't distort the rate
         if when is None:
-            when = time.time()
+            when = time.perf_counter()
         with self.lock:
             prev = self._last_update_time
             self._last_update_time = when
             self.last_writer = writer
             if prev is None or when <= prev:
                 return
-            rate = 1.0 / (when - prev)
+        delta = when - prev
+        if delta <= 0:
+            return
+        rate = 1.0 / delta
+        # ignore impossible bursts (scheduler artifacts or tight loops)
+        if rate > RATE_MAX_HZ:
+            return
+        with self.lock:
             self._rate_samples += 1
             self._rate_sum += rate
             self._rate_sum_sq += rate * rate

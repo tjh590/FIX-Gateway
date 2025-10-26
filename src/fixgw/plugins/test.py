@@ -19,6 +19,7 @@
 import threading
 import random
 import fixgw.plugin as plugin
+import time
 
 random.seed(123456)
 
@@ -39,7 +40,17 @@ class TestThread(threading.Thread):
             high = self.parent.config["high"]
             x = (random.random() * (high - low)) + low
             self.parent.db_write(self.parent.config["key"], x)
-
+            # throttle: use period (s) or rate (Hz) from config, default 50 Hz
+            rate = self.parent.config.get("rate", None)
+            period = self.parent.config.get("period", None)
+            if rate is not None:
+                try:
+                    period = 1.0 / float(rate)
+                except Exception:
+                    period = None
+            if period is None:
+                period = 0.02
+            time.sleep(period)
 
 class Plugin(plugin.PluginBase):
     def __init__(self, name, config, config_meta):
