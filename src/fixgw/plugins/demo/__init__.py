@@ -645,37 +645,43 @@ class MainThread(threading.Thread):
             count += 1
             script_when += 1
             time.sleep(0.1)
-
-            # Remove the global “reset TOL” spam. Only animate LAT/LONG so the UI shows motion.
-            for each in ["LAT", "LONG"]:
-                x = self.parent.db_read(each)
-                y = x[0] + (0.0000001 if (count % 2) == 0 else -0.0000001)
-                self.parent.db_write(each, y)
+            touched = set()
 
             # print(f"script_when:{script_when}, script_count:{script_count}")
             if "NO DATA" == self.script[script_count]["MAVMSG"]:
                 self.parent.db_write("MAVMSG", "NO DATA")
                 time.sleep(0.6)
+
             if script_when == 0:
                 script_count += 1
                 for k, v in self.script[script_count].items():
-                    self.parent.db_write(k, v)
-                    # print(f"{k}={v}")
+                    if not isinstance(v, str):
+                        self.parent.db_write(k, v)
+                        touched.add(k)
                 if script_count + 1 == len(self.script):
                     script_count = -1
             else:
                 if script_count < len(self.script):
                     for k, v in self.script[script_count].items():
                         if not isinstance(v, str):
-                            if self.script[script_count + 1].get(k, None) is not None:
-                                val = (
-                                    ((self.script[script_count + 1][k] - v) / 20)
-                                    * script_when
-                                ) + v
-                                # print(f"{script_when}: next: {self.script[script_count + 1][k]}, cur:{v}, val:{val}")
+                            nxt = self.script[script_count + 1].get(k, None)
+                            if nxt is not None:
+                                val = (((nxt - v) / 20) * script_when) + v
                                 self.parent.db_write(k, val)
+                                touched.add(k)
                 if script_when == 19:
                     script_when = -1
+                    
+            for each in self.keylist:
+                if each in touched:
+                    continue
+                x = self.parent.db_read(each)
+                if each in ["LAT", "LONG"]:
+                    y = x[0] + (0.0000001 if (count % 2) == 0 else -0.0000001)
+                    self.parent.db_write(each, y)
+                else:
+                    self.parent.db_write(each, x)
+
         self.running = False
 
     def stop(self):
