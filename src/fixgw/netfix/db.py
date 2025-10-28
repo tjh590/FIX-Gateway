@@ -499,7 +499,8 @@ class Database(object):
         self.connected = False
         self._stats_lock = threading.Lock()
         self._stats_dirty = set()
-        self._max_stats_refresh = 20
+        #self._max_stats_refresh = 20 # was 20, Max number of @q reports per second; keep low to reduce lock holds
+        self._max_stats_refresh = 0 # use report subscription callback now
         if self.client.isConnected():
             self.initialize()
             self.connected = True
@@ -510,6 +511,7 @@ class Database(object):
 
         # Callback functions
         self.connectCallback = None
+        self.client.cthread.reportCallback = self._on_report
 
     # These are the callbacks that we use to get events from teh client
     # This function is called when the connection state of the client
@@ -557,6 +559,15 @@ class Database(object):
                     with self._stats_lock:
                         self._stats_dirty.add(key)
 
+    def _on_report(self, payload):
+        # payload: "<key>;<desc>;...;last_writer;min;max;avg;stdev;samples"
+        a = payload.split(";")
+        key = a[0]
+        item = self.__items.get(key)
+        if not item: return
+        rep = fixgw.netfix.Report(["q", payload])  # reuse parser
+        item.update_stats_from_report(rep)
+
     # This callback gets a data update sentence from the server
     def dataFunction(self, x):
         if "." in x[0]:
@@ -582,17 +593,32 @@ class Database(object):
                 res = self.client.getReport(key)
                 rep = fixgw.netfix.Report(res)
                 item = self.define_item(key, rep)
+
+                #res = self.client.read(key)
+                #item.value = res[1]
+                #item.annunciate = "a" in res[2]
+                #item.old = "o" in res[2]
+                #item.bad = "b" in res[2]
+                #item.fail = "f" in res[2]
+                #item.secFail = "s" in res[2]
+
+                # Read initial value and flags without echoing them back
                 res = self.client.read(key)
-                item.value = res[1]
-                item.annunciate = "a" in res[2]
-                item.old = "o" in res[2]
-                item.bad = "b" in res[2]
-                item.fail = "f" in res[2]
-                item.secFail = "s" in res[2]
+                flags = res[2] if len(res) > 2 else ""
+                item.updateNoWrite([key, res[1], flags])
+
                 auxlist = item.get_aux_list()
                 for aux in auxlist:
-                    val = self.client.read("{}.{}".format(key, aux))
-                    item.set_aux_value(aux, val[1])
+                    #val = self.client.read("{}.{}".format(key, aux))
+                    #item.set_aux_value(aux, val[1])
+
+                    # Read initial aux and set locally without writing back
+                    val = self.client.read(f"{key}.{aux}")
+                    item.supressWrite = True
+                    try:
+                        item.set_aux_value(aux, val[1])
+                    finally:
+                        item.supressWrite = False
 
             self.init_event.set()
         except Exception as e:
@@ -616,13 +642,20 @@ class Database(object):
         item.units = rep.units
         item.tol = rep.tol
         item.init_aux(rep.aux)
+
         item.update_stats_from_report(rep)
         with self._stats_lock:
             self._stats_dirty.discard(key)
 
-        # Send a read command to the server to get initial data
+        ## Send a read command to the server to get initial data
+        #res = self.client.read(key)
+        #item.value = res[1]
+
+        # Prime the value locally without echoing it back
         res = self.client.read(key)
-        item.value = res[1]
+        flags = res[2] if len(res) > 2 else ""
+        item.updateNoWrite([key, res[1], flags])
+
         for each in item.aux:  # Read the Auxiliary data
             self.client.read("{0}.{1}".format(key, each))
         if item.reportReceived is not None:

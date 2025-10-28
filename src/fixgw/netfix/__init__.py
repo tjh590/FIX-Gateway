@@ -101,6 +101,7 @@ class ClientThread(threading.Thread):
         self.dataqueue = queue.Queue(maxsize=5000)
         self._dispatcher_stop = threading.Event()
         self._dispatcher = threading.Thread(target=self._dispatch_loop, daemon=True)
+        self.reportCallback = None
 
     def connectedState(self, connected):
         if connected:
@@ -111,6 +112,11 @@ class ClientThread(threading.Thread):
             self.connectCallback(connected)
 
     def handle_request(self, d):
+        if d.startswith("#q"):  # server-pushed report
+            if self.reportCallback:
+                self.reportCallback(d[2:])  # hand off payload
+            return
+                
         log.debug("Response - {}".format(d))
         if d[0] == "@":
             self.cmdqueue.put([d[1], d[2:]])
@@ -283,6 +289,16 @@ class Client:
         self.cthread.daemon = True
         self.lock = threading.Lock()
 
+    def subscribeReport(self, key, interval_ms=1000):
+        with self.lock:
+            self.cthread.send(f"@Q{key};{interval_ms}\n".encode())
+            self.cthread.getResponse("Q")
+
+    def unsubscribeReport(self, key):
+        with self.lock:
+            self.cthread.send(f"@UQ{key}\n".encode())
+            self.cthread.getResponse("U")
+            
     def connect(self):
         self.cthread.start()
         return self.cthread.connectWait()
@@ -334,7 +350,7 @@ class Client:
                     raise ResponseError("Key Not Found {}".format(e[0]))
                 else:
                     raise ResponseError("Response Error {} for {}".format(e[1], e[0]))
-            print("rpt:{0}".format(res[1]))
+            # print("rpt:{0}".format(res[1]))
             a = res[1].split(";")
             return a
 

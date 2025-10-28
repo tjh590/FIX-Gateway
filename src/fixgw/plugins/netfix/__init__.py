@@ -56,6 +56,7 @@ class Connection(object):
         )
         self.subscriptions = set()
         self.output_inhibit = False
+        self.report_subs = {}  # key -> period_secs
 
     # This sends a standard Net-FIX value update message to the queue.
     def __send_value(self, id, value):
@@ -267,6 +268,17 @@ class Connection(object):
                 self.__flag(d[2:])
             elif d[1] == "w":
                 self.__writeValue(d[2:])
+            elif d[1] == "Q":  # subscribe to reports
+                parts = d[2:].split(";")
+                key = parts[0]
+                period = float(parts[1]) / 1000.0 if len(parts) > 1 else 1.0
+                self.report_subs[key] = max(0.1, period)
+                self.queue.put(f"@Q{key}\n".encode())
+            elif d[1:3] == "UQ":  # unsubscribe
+                key = d[3:]
+                self.report_subs.pop(key, None)
+                self.queue.put(f"@UQ{key}\n".encode())
+
             else:  # Unknown command given
                 self.queue.put("{}!004\n".format(d).encode())
 
@@ -451,6 +463,7 @@ class ServerThread(threading.Thread):
 
         self.threads = []
         self.getout = False
+        self._report_tick = time.time()
 
     def run(self):
         while True:
@@ -487,6 +500,16 @@ class ServerThread(threading.Thread):
                             each[1].stop()
                             each[1].join()
                             self.threads.remove(each)
+
+                    # periodic report subscription push        
+                    now = time.time()
+                    if now - self._report_tick >= 1.0:
+                        self._report_tick = now
+                        for rcv, snd in self.threads:
+                            co = rcv.co
+                            for key, period in list(co.report_subs.items()):
+                                if (now // period) == ((now - 1) // period):
+                                    co._Connection__send_report(key)  # reuse existing builder
 
                 else:
                     co = Connection(self.parent, conn, addr)
