@@ -645,19 +645,13 @@ class MainThread(threading.Thread):
             count += 1
             script_when += 1
             time.sleep(0.1)
-            # We just read the point and write it back in to reset the TOL timer
-            for each in self.keylist:
+
+            # Remove the global “reset TOL” spam. Only animate LAT/LONG so the UI shows motion.
+            for each in ["LAT", "LONG"]:
                 x = self.parent.db_read(each)
-                if each in ["LAT", "LONG"]:
-                    y = x[0]
-                    if (count % 2) == 0:
-                        y += 0.0000001
-                    else:
-                        y -= 0.0000001
-                    self.parent.db_write(each, y)
-                else:
-                    self.parent.db_write(each, x)
-            # continue
+                y = x[0] + (0.0000001 if (count % 2) == 0 else -0.0000001)
+                self.parent.db_write(each, y)
+
             # print(f"script_when:{script_when}, script_count:{script_count}")
             if "NO DATA" == self.script[script_count]["MAVMSG"]:
                 self.parent.db_write("MAVMSG", "NO DATA")
