@@ -530,17 +530,22 @@ class Database(object):
             for key, item in self.__items.items():
                 try:
                     self.client.unsubscribe(key)
-                except:  # We ignore errors because the server is probably down
+                except:
+                    pass
+                try:
+                    self.client.unsubscribeReport(key)  # stop report pushes
+                except:
                     pass
                 if item.destroyed is not None:
                     item.destroyed()
             self.__items = {}
             with self._stats_lock:
                 self._stats_dirty.clear()
+
         else:
             if not self.connected:
                 return
-
+            # (keys_to_refresh loop remains, but _max_stats_refresh = 0)
             keys_to_refresh = []
             with self._stats_lock:
                 while self._stats_dirty and len(keys_to_refresh) < self._max_stats_refresh:
@@ -561,11 +566,15 @@ class Database(object):
 
     def _on_report(self, payload):
         # payload: "<key>;<desc>;...;last_writer;min;max;avg;stdev;samples"
-        a = payload.split(";")
-        key = a[0]
+        fields = payload.split(";")
+        if not fields:
+            return
+        key = fields[0]
         item = self.__items.get(key)
-        if not item: return
-        rep = fixgw.netfix.Report(["q", payload])  # reuse parser
+        if not item:
+            return
+        # Report expects the same list format as getReport() returns
+        rep = fixgw.netfix.Report(fields)
         item.update_stats_from_report(rep)
 
     # This callback gets a data update sentence from the server
@@ -663,6 +672,7 @@ class Database(object):
 
         # Subscribe to the point
         self.client.subscribe(key)
+        self.client.subscribeReport(key, interval_ms=1000)  # 1 Hz stats push
         self.__items[key] = item
         return item
 

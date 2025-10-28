@@ -292,12 +292,20 @@ class Client:
     def subscribeReport(self, key, interval_ms=1000):
         with self.lock:
             self.cthread.send(f"@Q{key};{interval_ms}\n".encode())
-            self.cthread.getResponse("Q")
+            # Do not block; server may not ack @Q. Best-effort short wait only.
+            try:
+                self.cthread.getResponse("Q", timeout=0.05)
+            except Exception:
+                pass
 
     def unsubscribeReport(self, key):
         with self.lock:
             self.cthread.send(f"@UQ{key}\n".encode())
-            self.cthread.getResponse("U")
+            # Do not block; best-effort short wait only.
+            try:
+                self.cthread.getResponse("U", timeout=0.05)
+            except Exception:
+                pass
             
     def connect(self):
         self.cthread.start()

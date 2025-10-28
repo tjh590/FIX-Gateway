@@ -21,7 +21,7 @@ import time
 import copy
 from fixgw import cfg
 
-RATE_MAX_HZ = 100000.0  # ignore instantaneous rates above this
+RATE_MAX_HZ = 100.0  # ignore instantaneous rates above this
 
 __database = {}
 

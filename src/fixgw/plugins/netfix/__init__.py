@@ -56,7 +56,7 @@ class Connection(object):
         )
         self.subscriptions = set()
         self.output_inhibit = False
-        self.report_subs = {}  # key -> period_secs
+        self.report_subs = {}  # key -> {"period": seconds, "last": last_sent_epoch}
 
     # This sends a standard Net-FIX value update message to the queue.
     def __send_value(self, id, value):
@@ -74,7 +74,9 @@ class Connection(object):
         #)
         self.queue.put(st.encode())
 
-    def __send_report(self, id):
+    # Add a prefix parameter to the server’s report sender and use “#” for periodic push.
+    # Keep “@q” for normal @q replies so existing clients still work.
+    def __send_report(self, id, prefix="@"):
         try:
             x = self.parent.db_get_item(id)
             if not x:
@@ -108,25 +110,10 @@ class Connection(object):
             elif x.last_writer:
                 last_writer = str(x.last_writer)
 
-            s = "@q{0};{1};{2};{3};{4};{5};{6};{7};{8};{9};{10};{11};{12};{13}\n".format(
-                id,
-                x.description,
-                x.typestring,
-                x.min,
-                x.max,
-                x.units,
-                x.tol,
-                a,
-                last_writer,
-                rate_min,
-                rate_max,
-                rate_avg,
-                rate_stdev,
-                rate_samples,
-            )
+            s = f"{prefix}q{id};{x.description};{x.typestring};{x.min};{x.max};{x.units};{x.tol};{a};{last_writer};{rate_min};{rate_max};{rate_avg};{rate_stdev};{rate_samples}\n"
             self.queue.put(s.encode())
         except KeyError:
-            self.queue.put("@q{0}!001\n".format(id).encode())
+            self.queue.put(f"@q{id}!001\n".encode())
 
     def __send_list(self):
         keys = self.parent.db_list()
@@ -268,11 +255,13 @@ class Connection(object):
                 self.__flag(d[2:])
             elif d[1] == "w":
                 self.__writeValue(d[2:])
+            elif d[1] == "q":
+                self.__send_report(id)  # replies stay as '@q...'
             elif d[1] == "Q":  # subscribe to reports
                 parts = d[2:].split(";")
                 key = parts[0]
                 period = float(parts[1]) / 1000.0 if len(parts) > 1 else 1.0
-                self.report_subs[key] = max(0.1, period)
+                self.report_subs[key] = {"period": max(0.1, period), "last": 0.0}
                 self.queue.put(f"@Q{key}\n".encode())
             elif d[1:3] == "UQ":  # unsubscribe
                 key = d[3:]
@@ -507,9 +496,12 @@ class ServerThread(threading.Thread):
                         self._report_tick = now
                         for rcv, snd in self.threads:
                             co = rcv.co
-                            for key, period in list(co.report_subs.items()):
-                                if (now // period) == ((now - 1) // period):
-                                    co._Connection__send_report(key)  # reuse existing builder
+                            for key, sub in list(co.report_subs.items()):
+                                period = max(0.1, float(sub.get("period", 1.0)))
+                                last = float(sub.get("last", 0.0))
+                                if now - last >= period:
+                                    co._Connection__send_report(key, prefix="#")
+                                    sub["last"] = now
 
                 else:
                     co = Connection(self.parent, conn, addr)
