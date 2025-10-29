@@ -40,9 +40,19 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.layoutStatus.addWidget(self.statusview)
         self.dataview = table.DataTable()
         self.layoutData.addWidget(self.dataview)
+        self.tabWidget.currentChanged.connect(self._on_tab)
 
         self.show()
 
+    def _on_tab(self, idx):
+        # 0 == Status tab in current UI
+        try:
+            self.statusview._timer.setActive(idx == 0)  # if you wrap start/stop
+        except AttributeError:
+            if idx == 0:
+                self.statusview._timer.start()
+            else:
+                self.statusview._timer.stop()
 
 def main(client):
     connection.initialize(client)
