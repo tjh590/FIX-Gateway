@@ -40,6 +40,12 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.layoutStatus.addWidget(self.statusview)
         self.dataview = table.DataTable()
         self.layoutData.addWidget(self.dataview)
+        
+         # Remove the unused "Simulate" tab
+        idx = self.tabWidget.indexOf(self.tabSimulate)
+        if idx != -1:
+            self.tabWidget.removeTab(idx)
+       
         self.tabWidget.currentChanged.connect(self._on_tab)
 
         self.show()
