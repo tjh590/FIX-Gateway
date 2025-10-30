@@ -53,12 +53,13 @@ class StatusView(QScrollArea):
         self.setWidget(self.textBox)
         self.connected = False
 
-        self.timer = QTimer()
-        self.timer.setInterval(1000)
-        self.timer.timeout.connect(self.update)
-        self.update()
+        #self.timer = QTimer()
+        #self.timer.setInterval(1000)
+        #self.timer.timeout.connect(self.update)
+        #self.update()
 
-        self._w = _StatusWorker(connection.client)
+        # Use the dedicated status_client that does no subscriptions/pushes
+        self._w = _StatusWorker(connection.status_client or connection.client)
         self._t = QThread(self)
         self._w.moveToThread(self._t)
         self._t.start()
@@ -72,7 +73,14 @@ class StatusView(QScrollArea):
         self._w.err.connect(lambda e: None)  # optional logging
 
     def _apply_status_json(self, s):
-        d = json.loads(s, object_pairs_hook=OrderedDict)
+        # Pretty-print JSON into the Status tab
+        try:
+            d = json.loads(s, object_pairs_hook=OrderedDict)
+            pretty_json = json.dumps(d, indent=2)
+            self.textBox.setText(pretty_json)
+        except Exception:
+            # Fallback: show raw string if JSON parse fails
+            self.textBox.setText(str(s))
 
     # def __init__(self, parent=None):
     #     super(StatusView, self).__init__(parent)
@@ -93,8 +101,8 @@ class StatusView(QScrollArea):
         else:
             self.textBox.clear()
             try:
-                res = connection.client.getStatus()
-            except fixgw.netfix.NotConnectedError:
+                res = (connection.status_client or connection.client).getStatus()
+            except netfix.NotConnectedError:
                 self.connected = False
                 return
             except Exception as e:
@@ -102,13 +110,13 @@ class StatusView(QScrollArea):
                 print("statusModel.update()", e)
                 return
             d = json.loads(res, object_pairs_hook=OrderedDict)
-            s = status.dict2string(d, spaces=8) + "\n"
+            s = json.dumps(d, indent=2)
             # for key in connection.db.get_item_list():
             #     s += "{} = {}\n".format(key, connection.db.get_value(key))
             self.textBox.setText(s)
 
-    def showEvent(self, QShowEvent):
-        self.timer.start()
+    #def showEvent(self, QShowEvent):
+    #    self.timer.start()
 
-    def hideEvent(self, QHideEvent):
-        self.timer.stop()
+    #def hideEvent(self, QHideEvent):
+    #    self.timer.stop()
