@@ -453,6 +453,10 @@ class ServerThread(threading.Thread):
         self.threads = []
         self.getout = False
         self._report_tick = time.time()
+        # Track last snapshot of per-connection message counters and timestamp
+        # Keyed by receive thread object id to be stable across calls
+        # value: {"recv": int, "sent": int, "ts": float}
+        self._last_counts = {}
 
     def run(self):
         while True:
@@ -519,11 +523,33 @@ class ServerThread(threading.Thread):
 
     def get_status(self):
         d = OrderedDict({"Current Connections": len(self.threads)})
+        # Prune old entries no longer present
+        current_keys = {id(t[0]) for t in self.threads}
+        for k in list(self._last_counts.keys()):
+            if k not in current_keys:
+                self._last_counts.pop(k, None)
+        now = time.time()
         for i, t in enumerate(self.threads):
             c = OrderedDict()
             c["Client"] = t[0].addr
-            c["Messages Received"] = t[0].msg_recv
-            c["Messages Sent"] = t[1].msg_sent
+            recv = t[0].msg_recv
+            sent = t[1].msg_sent
+            prev = self._last_counts.get(id(t[0]))
+            if prev is None:
+                rate_recv = 0.0
+                rate_sent = 0.0
+            else:
+                dt = max(1e-6, now - float(prev.get("ts", now)))
+                delta_recv = max(0, recv - int(prev.get("recv", recv)))
+                delta_sent = max(0, sent - int(prev.get("sent", sent)))
+                rate_recv = delta_recv / dt
+                rate_sent = delta_sent / dt
+            # Store current snapshot for next call
+            self._last_counts[id(t[0])] = {"recv": recv, "sent": sent, "ts": now}
+            c["Messages Received"] = recv
+            c["Messages Received Rate"] = round(rate_recv, 2)
+            c["Messages Sent"] = sent
+            c["Messages Sent Rate"] = round(rate_sent, 2)
             # "Subscriptions":','.join(t[0].co.subscriptions)}
             c["Subscriptions"] = len(t[0].co.subscriptions)
             d["Connection {0}".format(i)] = c

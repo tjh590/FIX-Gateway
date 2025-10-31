@@ -50,6 +50,16 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
         self.show()
 
+    def closeEvent(self, event):
+        # Attempt to disconnect the dedicated status client cleanly
+        try:
+            from . import connection
+            if connection.status_client is not None and connection.status_client is not connection.client:
+                connection.status_client.disconnect()
+        except Exception:
+            pass
+        return super().closeEvent(event)
+
     def _on_tab(self, idx):
         # 0 == Status tab in current UI
         try:

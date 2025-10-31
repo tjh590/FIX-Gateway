@@ -499,8 +499,8 @@ class Database(object):
         self.connected = False
         self._stats_lock = threading.Lock()
         self._stats_dirty = set()
-        #self._max_stats_refresh = 20 # was 20, Max number of @q reports per second; keep low to reduce lock holds
-        self._max_stats_refresh = 0 # use report subscription callback now
+        # Max number of @q reports per second; keep low to reduce lock holds
+        self._max_stats_refresh = 50
         if self.client.isConnected():
             self.initialize()
             self.connected = True
@@ -511,6 +511,7 @@ class Database(object):
 
         # Callback functions
         self.connectCallback = None
+        # Leave callback in place; used only if report subscriptions are enabled
         self.client.cthread.reportCallback = self._on_report
 
     # These are the callbacks that we use to get events from teh client
@@ -545,7 +546,7 @@ class Database(object):
         else:
             if not self.connected:
                 return
-            # (keys_to_refresh loop remains, but _max_stats_refresh = 0)
+            # Refresh a limited number of stats per cycle to avoid CPU spikes
             keys_to_refresh = []
             with self._stats_lock:
                 while self._stats_dirty and len(keys_to_refresh) < self._max_stats_refresh:
@@ -670,9 +671,8 @@ class Database(object):
         if item.reportReceived is not None:
             item.reportReceived()
 
-        # Subscribe to the point
+    # Subscribe to the point for value updates only (no report push)
         self.client.subscribe(key)
-        self.client.subscribeReport(key, interval_ms=1000)  # 1 Hz stats push
         self.__items[key] = item
         return item
 
