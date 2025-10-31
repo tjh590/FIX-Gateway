@@ -16,7 +16,14 @@
 #  USA.import plugin
 
 from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex, QTimer
-from PyQt6.QtWidgets import QTableView, QHeaderView
+from PyQt6.QtWidgets import (
+    QTableView,
+    QHeaderView,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
+    QStyle,
+)
+from PyQt6.QtGui import QPainter, QColor
 
 from . import connection
 
@@ -107,9 +114,10 @@ class _DataModel(QAbstractTableModel):
         col = index.column()
         it = self._items[row]
 
+        # Alignment for numeric columns
         if role == Qt.ItemDataRole.TextAlignmentRole:
-            if col in (7, 8, 9, 10, 11):  # rate/samples numeric columns
-                return int(self._align_right)
+            if col in (7, 8, 9, 10, 11):
+                return int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             return int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
         if role != Qt.ItemDataRole.DisplayRole:
@@ -147,6 +155,34 @@ class _DataModel(QAbstractTableModel):
             return None
 
 
+class BoolIndicatorDelegate(QStyledItemDelegate):
+    def __init__(self, color: QColor, parent=None):
+        super().__init__(parent)
+        self._color = color
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index):
+        # Prepare default style option and suppress text
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        opt.text = ""
+        style = opt.widget.style() if opt.widget else QStyle()
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, opt.widget)
+
+        # Determine state from display text
+        text = index.data(Qt.ItemDataRole.DisplayRole)
+        active = bool(text == "I")
+        r = opt.rect
+        size = min(r.height(), r.width(), 12)
+        x = r.x() + (r.width() - size) // 2
+        y = r.y() + (r.height() - size) // 2
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(QColor(150, 150, 150))
+        painter.setBrush(self._color if active else QColor(0, 0, 0, 0))
+        painter.drawEllipse(x, y, size, size)
+        painter.restore()
+
+
 class DataTable(QTableView):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -162,25 +198,33 @@ class DataTable(QTableView):
         self.setWordWrap(False)
         self.verticalHeader().setDefaultSectionSize(22)
 
-        # Column sizing: avoid resize-to-contents on every update; set reasonable defaults
+        # Column sizing: set reasonable defaults
         hh = self.horizontalHeader()
         hh.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        # Make Description stretch, value a bit wider
         if len(_COLS) >= 13:
             hh.setStretchLastSection(True)
             self.setColumnWidth(0, 120)  # Value
             self.setColumnWidth(6, 120)  # Writer
             for c in (7, 8, 9, 10, 11):
                 self.setColumnWidth(c, 90)
-            # booleans narrow
             for c in (1, 2, 3, 4, 5):
                 self.setColumnWidth(c, 55)
-
         # Coalesce frequent updates into periodic model flushes
         self._flush_timer = QTimer(self)
         self._flush_timer.setInterval(50)  # 20 Hz UI update cap
         self._flush_timer.timeout.connect(self._model.flush)
         self._flush_timer.start()
+
+        # Set custom boolean indicator delegates for columns 1..5
+        colors = {
+            1: QColor(0, 120, 215),   # Annun -> blue
+            2: QColor(255, 165, 0),   # Old -> orange
+            3: QColor(230, 0, 0),     # Bad -> red
+            4: QColor(180, 0, 0),     # Fail -> dark red
+            5: QColor(180, 0, 180),   # SFail -> magenta
+        }
+        for col, color in colors.items():
+            self.setItemDelegateForColumn(col, BoolIndicatorDelegate(color, self))
 
     def setActive(self, active: bool):
         if active:

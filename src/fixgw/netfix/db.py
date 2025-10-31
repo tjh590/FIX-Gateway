@@ -520,6 +520,17 @@ class Database(object):
     def connectFunction(self, x):
         log.debug("Database Connection State - {}".format(x))
         self.connected = x
+        if not x:
+            # Stop background polling thread when disconnected
+            try:
+                if hasattr(self, 'timer') and self.timer is not None:
+                    self.timer.stop()
+            except Exception:
+                pass
+            try:
+                self.client.clearDataCallback()
+            except Exception:
+                pass
         if self.connectCallback is not None:
             self.connectCallback(x)
 

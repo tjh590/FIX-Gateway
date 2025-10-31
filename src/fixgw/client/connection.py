@@ -116,3 +116,35 @@ def initialize(c):
     # Use a routed client so db operations use main for subs and status_client for reports
     routed = RoutedClient(client, status_client)
     db = fixgw.netfix.QtDb.Database(routed)
+
+def shutdown():
+    """Cleanly stop background DB activity and clients."""
+    global client, db, status_client
+    try:
+        # Stop db polling thread if present (netfix.db.Database.UpdateThread)
+        ndb = getattr(fixgw.netfix.QtDb, 'fixgw', None)
+    except Exception:
+        ndb = None
+    try:
+        # Access underlying netfix.db via QtDb.Database internals
+        # This code assumes QtDb.Database holds netfix.db.Database in _Database__db
+        if db is not None:
+            try:
+                underlying = getattr(db, '_Database__db', None)
+                if underlying is not None and hasattr(underlying, 'timer'):
+                    underlying.timer.stop()
+            except Exception:
+                pass
+    except Exception:
+        pass
+    # Disconnect clients
+    try:
+        if status_client is not None and status_client is not client:
+            status_client.disconnect()
+    except Exception:
+        pass
+    try:
+        if client is not None:
+            client.disconnect()
+    except Exception:
+        pass

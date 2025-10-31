@@ -165,14 +165,12 @@ class StatusView(QScrollArea):
         self._w.moveToThread(self._t)
         self._t.start()
 
+        # Drive the worker from a GUI-thread timer using a queued connection
         self._timer = QTimer(self)
         self._timer.setInterval(1500)  # slightly slower to reduce churn
-        self._timer.setSingleShot(True)
-        def _tick():
-            self._w.poll()
-            # Restart after completion; the worker clears _in_flight
-            self._timer.start()
-        self._timer.timeout.connect(_tick)
+        self._timer.setSingleShot(False)
+        # Because _w lives in a different thread, this becomes a queued connection
+        self._timer.timeout.connect(self._w.poll)
         self._timer.start()
 
         self._w.got.connect(self._apply_status_json)
@@ -235,3 +233,24 @@ class StatusView(QScrollArea):
 
     #def hideEvent(self, QHideEvent):
     #    self.timer.stop()
+
+    def shutdown(self):
+        # Stop timers first
+        try:
+            if hasattr(self, "_timer"):
+                self._timer.stop()
+        except Exception:
+            pass
+        # Stop perf monitor timer if present
+        try:
+            if hasattr(self, "_perf") and hasattr(self._perf, "_timer"):
+                self._perf._timer.stop()
+        except Exception:
+            pass
+        # Cleanly stop worker thread
+        try:
+            if hasattr(self, "_t") and self._t is not None:
+                self._t.quit()
+                self._t.wait(2000)
+        except Exception:
+            pass

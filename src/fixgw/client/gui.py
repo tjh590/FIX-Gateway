@@ -54,8 +54,20 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         # Attempt to disconnect the dedicated status client cleanly
         try:
             from . import connection
+            # Stop background DB polling first
+            try:
+                if hasattr(connection, 'shutdown'):
+                    connection.shutdown()
+            except Exception:
+                pass
             if connection.status_client is not None and connection.status_client is not connection.client:
                 connection.status_client.disconnect()
+        except Exception:
+            pass
+        # Stop background timers/threads in StatusView
+        try:
+            if hasattr(self, "statusview") and hasattr(self.statusview, "shutdown"):
+                self.statusview.shutdown()
         except Exception:
             pass
         return super().closeEvent(event)

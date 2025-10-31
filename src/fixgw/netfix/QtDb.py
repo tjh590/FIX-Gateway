@@ -60,6 +60,29 @@ class QtDB_Item(QObject):
         item.destroyed = self.destroyedFunc
         item.statsChanged = self.statsChangedFunc
 
+    def detach(self):
+        """Detach this Qt wrapper from the underlying db.Item callbacks.
+
+        This prevents calling bound methods on a deleted QObject when the
+        wrapper is cleared or the UI is torn down while the netfix db is
+        still delivering updates.
+        """
+        try:
+            it = self._item
+            it.valueChanged = None
+            it.valueWrite = None
+            it.annunciateChanged = None
+            it.oldChanged = None
+            it.badChanged = None
+            it.failChanged = None
+            it.secFailChanged = None
+            it.auxChanged = None
+            it.reportReceived = None
+            it.destroyed = None
+            it.statsChanged = None
+        except Exception:
+            pass
+
     def valueChangedFunc(self, value):
         self.valueChanged.emit(value)
 
@@ -246,16 +269,31 @@ class Database(object):
             self.initialize()
 
     def connectFunction(self, x):
+        # x == True when connected, False when disconnected
         if x:
-            self.__items = {}
-        else:
+            # On connect, (re)initialize wrappers
             self.initialize()
+        else:
+            # On disconnect, detach callbacks and clear wrappers
+            try:
+                for qt_item in self.__items.values():
+                    try:
+                        qt_item.detach()
+                    except Exception:
+                        pass
+            finally:
+                self.__items = {}
 
     def initialize(self):
         log.debug("Initializing Qt Database")
         if self.__items != {}:
-            log.warning("Trying to initialize an already initialized database")
-            return
+            # Detach existing callbacks safely before rebuilding
+            for qt_item in self.__items.values():
+                try:
+                    qt_item.detach()
+                except Exception:
+                    pass
+            self.__items = {}
         try:
             keys = self.__db.get_item_list()
             for key in keys:
