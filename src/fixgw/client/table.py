@@ -15,184 +15,177 @@
 #  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307,
 #  USA.import plugin
 
-from functools import partial
-
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QPushButton, QTableWidget, QHeaderView, QTableWidgetItem
+from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex, QTimer
+from PyQt6.QtWidgets import QTableView, QHeaderView
 
 from . import connection
-from . import dbItemDialog
-from . import common
 
 
-class CheckButton(QPushButton):
-    def setChecked(self, value):
-        super(CheckButton, self).setChecked(value)
-        if value:
-            self.setText("I")
-        else:
-            self.setText("0")
+_COLS = [
+    "Value",
+    "Annun",
+    "Old",
+    "Bad",
+    "Fail",
+    "SFail",
+    "Writer",
+    "Rate Avg",
+    "Rate Min",
+    "Rate Max",
+    "Rate Std",
+    "Samples",
+    "Description",
+]
 
 
-class DataTable(QTableWidget):
+class _DataModel(QAbstractTableModel):
     def __init__(self, parent=None):
-        super(DataTable, self).__init__(parent)
-        cols = [
-            "Value",
-            "Annun",
-            "Old",
-            "Bad",
-            "Fail",
-            "SFail",
-            "Writer",
-            "Rate Avg",
-            "Rate Min",
-            "Rate Max",
-            "Rate Std",
-            "Samples",
-            "Description",
-        ]
-        self.setColumnCount(len(cols))
-        self.setHorizontalHeaderLabels(cols)
-        self.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.ResizeToContents
-        )
-        # self.horizontalHeader().setMaximumSectionSize(int(self.width() * 20/100))
-
-        self._col_writer = cols.index("Writer")
-        self._col_rate_avg = cols.index("Rate Avg")
-        self._col_rate_min = cols.index("Rate Min")
-        self._col_rate_max = cols.index("Rate Max")
-        self._col_rate_std = cols.index("Rate Std")
-        self._col_rate_samples = cols.index("Samples")
-        self._col_description = cols.index("Description")
+        super().__init__(parent)
+        self._keys = connection.db.get_item_list()
+        self._keys.sort()
+        self._items = [connection.db.get_item(k) for k in self._keys]
+        self._dirty_rows = set()
         self._align_right = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
 
-        self.dblist = connection.db.get_item_list()
-        self.dblist.sort()
-        self.setRowCount(len(self.dblist))
-        self.setVerticalHeaderLabels(self.dblist)
-        for i, key in enumerate(self.dblist):
-            item = connection.db.get_item(key)
+        # Connect item signals to mark rows dirty; coalesce via external timer
+        for row, it in enumerate(self._items):
+            it.valueChanged.connect(lambda _v, r=row: self._mark_dirty(r))
+            it.annunciateChanged.connect(lambda _v, r=row: self._mark_dirty(r))
+            it.oldChanged.connect(lambda _v, r=row: self._mark_dirty(r))
+            it.badChanged.connect(lambda _v, r=row: self._mark_dirty(r))
+            it.failChanged.connect(lambda _v, r=row: self._mark_dirty(r))
+            it.secFailChanged.connect(lambda _v, r=row: self._mark_dirty(r))
+            it.statsChanged.connect(lambda _s, r=row: self._mark_dirty(r))
 
-            self._update_cell(
-                i,
-                self._col_description,
-                item.description,
-            )
+    def _mark_dirty(self, row):
+        self._dirty_rows.add(row)
 
-            cell = common.getValueControl(item, self)
-            self.setCellWidget(i, 0, cell)
+    # External caller flushes changes periodically
+    def flush(self):
+        if not self._dirty_rows:
+            return
+        rows = sorted(self._dirty_rows)
+        self._dirty_rows.clear()
+        # Emit minimal number of dataChanged signals by coalescing contiguous rows
+        start = rows[0]
+        prev = start
+        for r in rows[1:]:
+            if r != prev + 1:
+                top = self.index(start, 0)
+                bottom = self.index(prev, len(_COLS) - 1)
+                self.dataChanged.emit(top, bottom, [])
+                start = r
+            prev = r
+        top = self.index(start, 0)
+        bottom = self.index(prev, len(_COLS) - 1)
+        self.dataChanged.emit(top, bottom, [])
 
-            cb = CheckButton(self)
-            cb.setCheckable(True)
-            cb.setChecked(item.annunciate)
-            cb.clicked.connect(item.setAnnunciate)
-            item.annunciateChanged.connect(cb.setChecked)
-            self.setCellWidget(i, 1, cb)
+    # Qt model API
+    def rowCount(self, parent=QModelIndex()):
+        return 0 if parent.isValid() else len(self._items)
 
-            cb = CheckButton(self)
-            cb.setCheckable(True)
-            cb.setChecked(item.old)
-            cb.clicked.connect(item.setOld)
-            item.oldChanged.connect(cb.setChecked)
-            self.setCellWidget(i, 2, cb)
+    def columnCount(self, parent=QModelIndex()):
+        return 0 if parent.isValid() else len(_COLS)
 
-            cb = CheckButton(self)
-            cb.setCheckable(True)
-            cb.setChecked(item.bad)
-            cb.clicked.connect(item.setBad)
-            item.badChanged.connect(cb.setChecked)
-            self.setCellWidget(i, 3, cb)
-
-            cb = CheckButton(self)
-            cb.setCheckable(True)
-            cb.setChecked(item.fail)
-            cb.clicked.connect(item.setFail)
-            item.failChanged.connect(cb.setChecked)
-            self.setCellWidget(i, 4, cb)
-
-            cb = CheckButton(self)
-            cb.setCheckable(True)
-            cb.setChecked(item.secFail)
-            cb.clicked.connect(item.setSecFail)
-            item.secFailChanged.connect(cb.setChecked)
-            self.setCellWidget(i, 5, cb)
-
-            item.statsChanged.connect(partial(self._handle_stats_changed, i))
-            self._handle_stats_changed(
-                i,
-                {
-                    "last_writer": item.last_writer,
-                    "avg": item.rate_avg,
-                    "min": item.rate_min,
-                    "max": item.rate_max,
-                    "stdev": item.rate_stdev,
-                    "samples": item.rate_samples,
-                },
-            )
-
-        self.resizeColumnsToContents()
-        self.verticalHeader().sectionDoubleClicked.connect(self.keySelected)
-
-    def keySelected(self, x):
-        key = self.verticalHeaderItem(x).text()
-        d = dbItemDialog.ItemDialog(self)
-        d.setKey(key)
-        d.show()
-
-    def _format_rate(self, value):
-        if value is None:
-            return ""
-        return f"{value:.2f}"
-
-    def _format_samples(self, value):
-        if value is None:
-            return ""
-        return str(value)
-
-    def _update_cell(self, row, column, value, alignment=None):
-        display = "" if value is None else str(value)
-        item = self.item(row, column)
-        if item is None:
-            item = QTableWidgetItem(display)
-            item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
-            align = alignment if alignment is not None else Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-            item.setTextAlignment(align)
-            self.setItem(row, column, item)
+    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
+        if role != Qt.ItemDataRole.DisplayRole:
+            return None
+        if orientation == Qt.Orientation.Horizontal:
+            return _COLS[section]
         else:
-            item.setText(display)
+            return self._keys[section] if 0 <= section < len(self._keys) else None
 
-    def _handle_stats_changed(self, row, stats):
-        writer = stats.get("last_writer") or ""
-        self._update_cell(row, self._col_writer, writer)
-        self._update_cell(
-            row,
-            self._col_rate_avg,
-            self._format_rate(stats.get("avg")),
-            self._align_right,
-        )
-        self._update_cell(
-            row,
-            self._col_rate_min,
-            self._format_rate(stats.get("min")),
-            self._align_right,
-        )
-        self._update_cell(
-            row,
-            self._col_rate_max,
-            self._format_rate(stats.get("max")),
-            self._align_right,
-        )
-        self._update_cell(
-            row,
-            self._col_rate_std,
-            self._format_rate(stats.get("stdev")),
-            self._align_right,
-        )
-        self._update_cell(
-            row,
-            self._col_rate_samples,
-            self._format_samples(stats.get("samples")),
-            self._align_right,
-        )
+    def flags(self, index):
+        if not index.isValid():
+            return Qt.ItemFlag.NoItemFlags
+        return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+
+    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
+        if not index.isValid():
+            return None
+        row = index.row()
+        col = index.column()
+        it = self._items[row]
+
+        if role == Qt.ItemDataRole.TextAlignmentRole:
+            if col in (7, 8, 9, 10, 11):  # rate/samples numeric columns
+                return int(self._align_right)
+            return int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
+        if role != Qt.ItemDataRole.DisplayRole:
+            return None
+
+        try:
+            if col == 0:
+                v = it.value
+                return "" if v is None else str(v)
+            elif col == 1:
+                return "I" if it.annunciate else "0"
+            elif col == 2:
+                return "I" if it.old else "0"
+            elif col == 3:
+                return "I" if it.bad else "0"
+            elif col == 4:
+                return "I" if it.fail else "0"
+            elif col == 5:
+                return "I" if it.secFail else "0"
+            elif col == 6:
+                return it.last_writer or ""
+            elif col == 7:
+                return "" if it.rate_avg is None else f"{it.rate_avg:.2f}"
+            elif col == 8:
+                return "" if it.rate_min is None else f"{it.rate_min:.2f}"
+            elif col == 9:
+                return "" if it.rate_max is None else f"{it.rate_max:.2f}"
+            elif col == 10:
+                return "" if it.rate_stdev is None else f"{it.rate_stdev:.2f}"
+            elif col == 11:
+                return "" if it.rate_samples is None else str(it.rate_samples)
+            elif col == 12:
+                return it.description
+        except Exception:
+            return None
+
+
+class DataTable(QTableView):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._model = _DataModel(self)
+        self.setModel(self._model)
+        self.setAlternatingRowColors(True)
+        self.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        self.setSelectionMode(QTableView.SelectionMode.SingleSelection)
+        self.verticalHeader().setVisible(True)
+        self.setSortingEnabled(False)
+        # QTableView doesn't support setUniformRowHeights (that's for QTreeView).
+        # Prefer fixed row height via header and disable word wrap for perf.
+        self.setWordWrap(False)
+        self.verticalHeader().setDefaultSectionSize(22)
+
+        # Column sizing: avoid resize-to-contents on every update; set reasonable defaults
+        hh = self.horizontalHeader()
+        hh.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        # Make Description stretch, value a bit wider
+        if len(_COLS) >= 13:
+            hh.setStretchLastSection(True)
+            self.setColumnWidth(0, 120)  # Value
+            self.setColumnWidth(6, 120)  # Writer
+            for c in (7, 8, 9, 10, 11):
+                self.setColumnWidth(c, 90)
+            # booleans narrow
+            for c in (1, 2, 3, 4, 5):
+                self.setColumnWidth(c, 55)
+
+        # Coalesce frequent updates into periodic model flushes
+        self._flush_timer = QTimer(self)
+        self._flush_timer.setInterval(50)  # 20 Hz UI update cap
+        self._flush_timer.timeout.connect(self._model.flush)
+        self._flush_timer.start()
+
+    def setActive(self, active: bool):
+        if active:
+            if not self._flush_timer.isActive():
+                self._flush_timer.start()
+        else:
+            if self._flush_timer.isActive():
+                self._flush_timer.stop()

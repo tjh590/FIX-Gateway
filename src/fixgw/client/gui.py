@@ -69,6 +69,11 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                 self.statusview._timer.start()
             else:
                 self.statusview._timer.stop()
+        # 1 == Data tab in current UI
+        try:
+            self.dataview.setActive(idx == 1)
+        except Exception:
+            pass
 
 def main(client):
     connection.initialize(client)
