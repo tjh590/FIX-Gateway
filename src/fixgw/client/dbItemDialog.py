@@ -115,10 +115,35 @@ class ItemDialog(QDialog, itemDialog_ui.Ui_Dialog):
         l5.setText("Value:")
         r5 = common.getValueControl(self.item, self.scrollAreaWidgetContents, False)
         self._valueControl = r5
+        # Initialize the editor with current value BEFORE wiring signals
+        try:
+            if hasattr(r5, "setValue"):
+                r5.setValue(self.item.value)
+            elif hasattr(r5, "setChecked"):
+                r5.setChecked(bool(self.item.value))
+            elif hasattr(r5, "setText"):
+                r5.setText(str(self.item.value))
+        except Exception:
+            pass
         self.formLayout.addRow(l5, r5)
-        # One-way binding to avoid calling into a deleted widget on close
-        r5.valueChanged.connect(self.item.setValue)
-        self._bindings.append((r5.valueChanged, self.item.setValue))
+        # One-way binding (control -> item) to avoid post-close callbacks
+        try:
+            if hasattr(r5, "valueChanged"):
+                r5.valueChanged.connect(self.item.setValue)
+                self._bindings.append((r5.valueChanged, self.item.setValue))
+            elif hasattr(r5, "textChanged"):
+                r5.textChanged.connect(self.item.setValue)
+                self._bindings.append((r5.textChanged, self.item.setValue))
+            elif hasattr(r5, "stateChanged"):
+                def _on_state_changed(state):
+                    try:
+                        self.item.setValue(bool(state))
+                    except Exception:
+                        pass
+                r5.stateChanged.connect(_on_state_changed)
+                self._bindings.append((r5.stateChanged, _on_state_changed))
+        except Exception:
+            pass
 
         l6 = QLabel(self.scrollAreaWidgetContents)
         l6.setText("Annunciate")
