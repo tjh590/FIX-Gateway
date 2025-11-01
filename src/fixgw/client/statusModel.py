@@ -15,8 +15,15 @@
 #  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307,
 #  USA.import plugin
 
-from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal
-from PyQt6.QtWidgets import QScrollArea, QLabel, QPlainTextEdit
+from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal, QModelIndex
+from PyQt6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QPushButton,
+    QTreeView,
+)
+from PyQt6.QtGui import QStandardItemModel, QStandardItem
 import json
 from collections import OrderedDict
 import threading
@@ -143,16 +150,46 @@ class _PerfMonitor(QObject):
             d["Qt Missed Ticks (>=2x)"] = int(self._missed_ticks)
         return d
 
-class StatusView(QScrollArea):
+class StatusView(QWidget):
     def __init__(self, parent=None):
         super(StatusView, self).__init__(parent)
-        self.setWidgetResizable(True)
-        # Use a QPlainTextEdit for efficient large text updates
-        self.textBox = QPlainTextEdit(self)
-        self.textBox.setReadOnly(True)
-        self.setWidget(self.textBox)
+        # Layout with controls + tree view
+        self._root_layout = QVBoxLayout(self)
+        self._root_layout.setContentsMargins(0, 0, 0, 0)
+        self._root_layout.setSpacing(6)
+
+        controls = QHBoxLayout()
+        controls.setContentsMargins(0, 0, 0, 0)
+        controls.setSpacing(6)
+        self._btn_expand = QPushButton("Expand All", self)
+        self._btn_collapse = QPushButton("Collapse All", self)
+        self._btn_expand.clicked.connect(self._expand_all_and_save)
+        self._btn_collapse.clicked.connect(self._collapse_all_and_save)
+        controls.addWidget(self._btn_expand)
+        controls.addWidget(self._btn_collapse)
+        controls.addStretch(1)
+
+        self._tree = QTreeView(self)
+        self._tree.setAlternatingRowColors(True)
+        self._tree.setUniformRowHeights(True)
+        self._tree.setHeaderHidden(False)
+        self._tree.setEditTriggers(QTreeView.EditTrigger.NoEditTriggers)
+        self._model = QStandardItemModel(self)
+        self._model.setHorizontalHeaderLabels(["Key", "Value"])
+        self._tree.setModel(self._model)
+
+        self._root_layout.addLayout(controls)
+        self._root_layout.addWidget(self._tree)
         self.connected = False
         self._perf = _PerfMonitor(self, tick_ms=100)
+        self._expanded_paths = set()
+
+        # Track user expand/collapse interactions to persist across updates
+        try:
+            self._tree.expanded.connect(self._on_expanded)
+            self._tree.collapsed.connect(self._on_collapsed)
+        except Exception:
+            pass
 
         #self.timer = QTimer()
         #self.timer.setInterval(1000)
@@ -173,14 +210,15 @@ class StatusView(QScrollArea):
         self._timer.timeout.connect(self._w.poll)
         self._timer.start()
 
+        # Connect worker signals
         self._w.got.connect(self._apply_status_json)
         self._w.err.connect(lambda e: None)  # optional logging
 
     def _apply_status_json(self, s):
-        # Pretty-print JSON into the Status tab
+        # Parse JSON and populate the tree model
         try:
             d = json.loads(s, object_pairs_hook=OrderedDict)
-            # Inject client-side performance metrics into Performance subtree when present
+            # Inject client-side performance metrics
             try:
                 client_perf = self._perf.get_metrics()
                 if isinstance(d.get("Performance"), dict):
@@ -189,11 +227,139 @@ class StatusView(QScrollArea):
                     d["Client Performance"] = client_perf
             except Exception:
                 pass
-            pretty_json = json.dumps(d, indent=2)
-            self.textBox.setPlainText(pretty_json)
+            # Preserve current expansion paths across rebuild
+            restore_paths = set(self._expanded_paths) if self._expanded_paths is not None else set()
+            self._populate_tree(d)
+            # Restore expansion state
+            if restore_paths:
+                self._restore_expanded_paths(restore_paths)
         except Exception:
-            # Fallback: show raw string if JSON parse fails
-            self.textBox.setPlainText(str(s))
+            # If JSON parse fails, show a single root with raw text
+            self._populate_tree({"raw": str(s)})
+
+    def _populate_tree(self, data):
+        # Rebuild the model from a nested dict/list tree
+        model = QStandardItemModel(self)
+        model.setHorizontalHeaderLabels(["Key", "Value"])
+
+        def add_node(parent, key, value):
+            key_item = QStandardItem(str(key))
+            val_item = QStandardItem("")
+            # Leaf node
+            if not isinstance(value, (dict, list)):
+                val_item.setText(str(value))
+                key_item.setEditable(False)
+                val_item.setEditable(False)
+                parent.appendRow([key_item, val_item])
+                return
+            # Container node
+            key_item.setEditable(False)
+            val_item.setEditable(False)
+            parent.appendRow([key_item, val_item])
+            container = key_item
+            if isinstance(value, dict):
+                for k, v in value.items():
+                    add_node(container, k, v)
+            elif isinstance(value, list):
+                for idx, v in enumerate(value):
+                    add_node(container, f"[{idx}]", v)
+
+        # Top-level: if dict, add each item; else add as a single root value
+        root = model.invisibleRootItem()
+        if isinstance(data, dict):
+            for k, v in data.items():
+                add_node(root, k, v)
+        else:
+            add_node(root, "root", data)
+
+        self._model = model
+        self._tree.setModel(self._model)
+
+    # --- Expansion state persistence helpers ---
+    def _index_to_path(self, index: QModelIndex):
+        try:
+            idx = index.sibling(index.row(), 0)
+        except Exception:
+            idx = index
+        path = []
+        m = self._model
+        while idx.isValid():
+            try:
+                key = m.data(idx)
+            except Exception:
+                key = None
+            path.append(str(key))
+            idx = idx.parent()
+        return tuple(reversed(path))
+
+    def _get_expanded_paths(self):
+        paths = set()
+        m = self._model
+
+        def visit(parent_idx: QModelIndex, parent_path: tuple):
+            rows = m.rowCount(parent_idx)
+            for r in range(rows):
+                idx = m.index(r, 0, parent_idx)
+                key = m.data(idx)
+                this_path = parent_path + (str(key),)
+                if self._tree.isExpanded(idx):
+                    paths.add(this_path)
+                visit(idx, this_path)
+
+        visit(QModelIndex(), tuple())
+        return paths
+
+    def _restore_expanded_paths(self, paths: set):
+        m = self._model
+
+        def visit(parent_idx: QModelIndex, parent_path: tuple):
+            rows = m.rowCount(parent_idx)
+            for r in range(rows):
+                idx = m.index(r, 0, parent_idx)
+                key = m.data(idx)
+                this_path = parent_path + (str(key),)
+                if this_path in paths:
+                    try:
+                        self._tree.expand(idx)
+                    except Exception:
+                        pass
+                visit(idx, this_path)
+
+        visit(QModelIndex(), tuple())
+        # Save back the final expanded set (in case some paths were missing)
+        try:
+            self._expanded_paths = self._get_expanded_paths()
+        except Exception:
+            pass
+
+    def _on_expanded(self, index: QModelIndex):
+        try:
+            p = self._index_to_path(index)
+            self._expanded_paths.add(p)
+        except Exception:
+            pass
+
+    def _on_collapsed(self, index: QModelIndex):
+        try:
+            p = self._index_to_path(index)
+            if p in self._expanded_paths:
+                self._expanded_paths.discard(p)
+        except Exception:
+            pass
+
+    def _expand_all_and_save(self):
+        try:
+            self._tree.expandAll()
+            self._expanded_paths = self._get_expanded_paths()
+        except Exception:
+            pass
+
+    def _collapse_all_and_save(self):
+        try:
+            self._tree.collapseAll()
+            self._expanded_paths.clear()
+        except Exception:
+            pass
 
     # def __init__(self, parent=None):
     #     super(StatusView, self).__init__(parent)
@@ -207,26 +373,7 @@ class StatusView(QScrollArea):
     #     self.timer.timeout.connect(self.update)
     #     self.update()
 
-    def update(self):
-        if not self.connected:
-            if connection.client.isConnected():
-                self.connected = True
-        else:
-            self.textBox.clear()
-            try:
-                res = (connection.status_client or connection.client).getStatus()
-            except netfix.NotConnectedError:
-                self.connected = False
-                return
-            except Exception as e:
-                self.textBox.setPlainText("")
-                print("statusModel.update()", e)
-                return
-            d = json.loads(res, object_pairs_hook=OrderedDict)
-            s = json.dumps(d, indent=2)
-            # for key in connection.db.get_item_list():
-            #     s += "{} = {}\n".format(key, connection.db.get_value(key))
-            self.textBox.setPlainText(s)
+    # Deprecated legacy text update method removed; tree view is updated by _StatusWorker
 
     #def showEvent(self, QShowEvent):
     #    self.timer.start()
