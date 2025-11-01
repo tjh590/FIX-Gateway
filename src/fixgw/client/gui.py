@@ -38,10 +38,11 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         # self.client = client
         self.statusview = statusModel.StatusView()
         self.layoutStatus.addWidget(self.statusview)
-        self.dataview = table.DataTable()
+        # Data tab: quick filter + table
+        self.dataview = table.DataPanel()
         self.layoutData.addWidget(self.dataview)
         
-         # Remove the unused "Simulate" tab
+        # Remove the unused "Simulate" tab
         idx = self.tabWidget.indexOf(self.tabSimulate)
         if idx != -1:
             self.tabWidget.removeTab(idx)

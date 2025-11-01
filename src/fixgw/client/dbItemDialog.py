@@ -41,7 +41,11 @@ class ItemDialog(QDialog, itemDialog_ui.Ui_Dialog):
     def __init__(self, *args, **kwargs):
         super(ItemDialog, self).__init__(*args, **kwargs)
         self.setupUi(self)
-        self.setAttribute(Qt.WindowType.WindowType.WidgetAttribute.WA_DeleteOnClose)
+        # Ensure the dialog gets deleted on close to avoid leaks
+        # PyQt6: use Qt.WidgetAttribute instead of the old enum path
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._valueControl = None  # main value editor; used to disconnect on close
+        self._bindings = []  # list of (signal, slot) tuples to disconnect on close
 
     def auxAddClosure(self, auxname):
         def func():
@@ -109,8 +113,12 @@ class ItemDialog(QDialog, itemDialog_ui.Ui_Dialog):
 
         l5 = QLabel(self.scrollAreaWidgetContents)
         l5.setText("Value:")
-        r5 = common.getValueControl(self.item, self.scrollAreaWidgetContents)
+        r5 = common.getValueControl(self.item, self.scrollAreaWidgetContents, False)
+        self._valueControl = r5
         self.formLayout.addRow(l5, r5)
+        # One-way binding to avoid calling into a deleted widget on close
+        r5.valueChanged.connect(self.item.setValue)
+        self._bindings.append((r5.valueChanged, self.item.setValue))
 
         l6 = QLabel(self.scrollAreaWidgetContents)
         l6.setText("Annunciate")
@@ -119,6 +127,8 @@ class ItemDialog(QDialog, itemDialog_ui.Ui_Dialog):
         r6.stateChanged.connect(self.item.setAnnunciate)
         self.item.annunciateChanged.connect(r6.setChecked)
         self.formLayout.addRow(l6, r6)
+        self._bindings.append((r6.stateChanged, self.item.setAnnunciate))
+        self._bindings.append((self.item.annunciateChanged, r6.setChecked))
 
         l7 = QLabel(self.scrollAreaWidgetContents)
         l7.setText("Old")
@@ -127,6 +137,8 @@ class ItemDialog(QDialog, itemDialog_ui.Ui_Dialog):
         r7.stateChanged.connect(self.item.setOld)
         self.item.oldChanged.connect(r7.setChecked)
         self.formLayout.addRow(l7, r7)
+        self._bindings.append((r7.stateChanged, self.item.setOld))
+        self._bindings.append((self.item.oldChanged, r7.setChecked))
 
         l8 = QLabel(self.scrollAreaWidgetContents)
         l8.setText("Bad")
@@ -135,6 +147,8 @@ class ItemDialog(QDialog, itemDialog_ui.Ui_Dialog):
         r8.stateChanged.connect(self.item.setBad)
         self.item.badChanged.connect(r8.setChecked)
         self.formLayout.addRow(l8, r8)
+        self._bindings.append((r8.stateChanged, self.item.setBad))
+        self._bindings.append((self.item.badChanged, r8.setChecked))
 
         l9 = QLabel(self.scrollAreaWidgetContents)
         l9.setText("Failed")
@@ -143,6 +157,8 @@ class ItemDialog(QDialog, itemDialog_ui.Ui_Dialog):
         r9.setChecked(self.item.fail)
         self.item.failChanged.connect(r9.setChecked)
         self.formLayout.addRow(l9, r9)
+        self._bindings.append((r9.stateChanged, self.item.setFail))
+        self._bindings.append((self.item.failChanged, r9.setChecked))
 
         l = QLabel(self.scrollAreaWidgetContents)
         l.setText("Sec Failed")
@@ -151,6 +167,8 @@ class ItemDialog(QDialog, itemDialog_ui.Ui_Dialog):
         r.stateChanged.connect(self.item.setSecFail)
         self.item.secFailChanged.connect(r.setChecked)
         self.formLayout.addRow(l, r)
+        self._bindings.append((r.stateChanged, self.item.setSecFail))
+        self._bindings.append((self.item.secFailChanged, r.setChecked))
 
         aux_list = self.item.get_aux_list()
         self.aux_controls = {}
@@ -160,9 +178,11 @@ class ItemDialog(QDialog, itemDialog_ui.Ui_Dialog):
             l.setText(aux)
 
             vc = common.getValueControl(self.item, self.scrollAreaWidgetContents, False)
-            vc.valueChanged.connect(auxValueSlotClosure(self.item, aux))
+            slot = auxValueSlotClosure(self.item, aux)
+            vc.valueChanged.connect(slot)
             vc.hide()
             d["control"] = vc
+            d["slot"] = slot
 
             vl = QLabel(self.scrollAreaWidgetContents)
             vl.setText("None")
@@ -194,6 +214,31 @@ class ItemDialog(QDialog, itemDialog_ui.Ui_Dialog):
                 vl.hide()
                 vc.show()
             self.formLayout.addRow(l, box)
+
+    def closeEvent(self, event):
+        # Proactively disconnect all recorded bindings to avoid calling
+        # methods on deleted widgets after the dialog is closed.
+        try:
+            for sig, slot in self._bindings:
+                try:
+                    sig.disconnect(slot)
+                except Exception:
+                    pass
+            # Also disconnect aux editor bindings
+            try:
+                for aux, d in getattr(self, "aux_controls", {}).items():
+                    vc = d.get("control")
+                    slot = d.get("slot")
+                    if vc is not None and slot is not None:
+                        try:
+                            vc.valueChanged.disconnect(slot)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+        except Exception:
+            pass
+        super().closeEvent(event)
 
 
 # TODO:

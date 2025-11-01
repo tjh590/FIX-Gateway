@@ -411,8 +411,21 @@ class SendThread(threading.Thread):
                 data = self.co.queue.get()
                 if data == "exit":
                     break
-                self.conn.sendall(data)
-                self.msg_sent += 1
+                try:
+                    self.conn.sendall(data)
+                    self.msg_sent += 1
+                except (BrokenPipeError, OSError) as e:
+                    # Client socket went away; exit cleanly
+                    try:
+                        self.log.debug(
+                            "SendThread broken pipe to %s:%s - %s",
+                            str(self.addr[0]),
+                            str(self.addr[1]),
+                            str(e),
+                        )
+                    except Exception:
+                        pass
+                    break
             self.running = False
         finally:
             self.conn.close()

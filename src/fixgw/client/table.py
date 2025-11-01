@@ -15,17 +15,21 @@
 #  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307,
 #  USA.import plugin
 
-from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex, QTimer
+from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex, QTimer, QSortFilterProxyModel
 from PyQt6.QtWidgets import (
     QTableView,
     QHeaderView,
     QStyledItemDelegate,
     QStyleOptionViewItem,
     QStyle,
+    QWidget,
+    QVBoxLayout,
+    QLineEdit,
 )
 from PyQt6.QtGui import QPainter, QColor
 
 from . import connection
+from .dbItemDialog import ItemDialog
 
 
 _COLS = [
@@ -154,6 +158,46 @@ class _DataModel(QAbstractTableModel):
         except Exception:
             return None
 
+    # Helpers for filtering
+    def key_at(self, row: int) -> str:
+        try:
+            return self._keys[row]
+        except Exception:
+            return ""
+
+    def writer_at(self, row: int) -> str:
+        try:
+            return self._items[row].last_writer or ""
+        except Exception:
+            return ""
+
+
+class _DataFilterProxy(QSortFilterProxyModel):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._text = ""
+        self.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+
+    def setFilterText(self, text: str):
+        text = text or ""
+        if text == self._text:
+            return
+        self._text = text
+        self.invalidateFilter()
+
+    def filterAcceptsRow(self, source_row: int, source_parent):
+        if not self._text:
+            return True
+        model = self.sourceModel()
+        if not isinstance(model, _DataModel):
+            return True
+        t = self._text
+        if t in model.key_at(source_row):
+            return True
+        if t in model.writer_at(source_row):
+            return True
+        return False
+
 
 class BoolIndicatorDelegate(QStyledItemDelegate):
     def __init__(self, color: QColor, parent=None):
@@ -187,7 +231,9 @@ class DataTable(QTableView):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._model = _DataModel(self)
-        self.setModel(self._model)
+        self._proxy = _DataFilterProxy(self)
+        self._proxy.setSourceModel(self._model)
+        self.setModel(self._proxy)
         self.setAlternatingRowColors(True)
         self.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self.setSelectionMode(QTableView.SelectionMode.SingleSelection)
@@ -226,6 +272,10 @@ class DataTable(QTableView):
         for col, color in colors.items():
             self.setItemDelegateForColumn(col, BoolIndicatorDelegate(color, self))
 
+        # Open Item Details on double-click
+        self.doubleClicked.connect(self._open_item_for_index)
+
+
     def setActive(self, active: bool):
         if active:
             if not self._flush_timer.isActive():
@@ -233,3 +283,51 @@ class DataTable(QTableView):
         else:
             if self._flush_timer.isActive():
                 self._flush_timer.stop()
+
+    def setFilterText(self, text: str):
+        self._proxy.setFilterText(text)
+
+    # UI helpers
+    def _open_item_for_index(self, proxy_index: QModelIndex):
+        try:
+            if not proxy_index or not proxy_index.isValid():
+                return
+            src_index = self._proxy.mapToSource(proxy_index)
+            row = src_index.row()
+            key = self._model.key_at(row)
+            if not key:
+                return
+            dlg = ItemDialog(self)
+            dlg.setKey(key)
+            dlg.exec()
+        except Exception:
+            # Be resilient; avoid crashing UI on unexpected states
+            import traceback
+            print("Failed to open Item details:")
+            traceback.print_exc()
+
+    # Removed right-click context menu; use double-click to open the dialog
+
+
+class DataPanel(QWidget):
+    """Composite widget: filter box + data table."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._table = DataTable(self)
+        self._filter = QLineEdit(self)
+        self._filter.setPlaceholderText("Filter by item name or writer…")
+        self._filter.textChanged.connect(self._table.setFilterText)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
+        lay.addWidget(self._filter)
+        lay.addWidget(self._table)
+
+    # pass-through helpers used by gui.py
+    def setActive(self, active: bool):
+        self._table.setActive(active)
+
+    # expose table for future extensions if needed
+    @property
+    def table(self) -> 'DataTable':
+        return self._table
