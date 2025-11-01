@@ -22,11 +22,7 @@
 
 import threading
 import socket
-
-try:
-    import queue
-except:
-    import Queue as queue
+import queue
 from collections import OrderedDict
 from collections import defaultdict
 from collections import deque
@@ -49,6 +45,7 @@ class Connection(object):
         self.addr = addr
         self.log = parent.log
         self.queue = queue.Queue()
+        self.name = None  # Optional human-friendly client name
         self.buffer_size = (
             int(parent.config["buffer_size"])
             if ("buffer_size" in parent.config) and parent.config["buffer_size"]
@@ -141,6 +138,14 @@ class Connection(object):
         if d == "status":
             s = json.dumps(status.get_dict())
             self.queue.put("@xstatus;{}\n".format(s).encode())
+        elif d.startswith("name;"):
+            # Optional client-defined connection name: @xname;<text>
+            try:
+                self.name = d.split(";", 1)[1][:64]
+            except Exception:
+                self.name = None
+            # Acknowledge with a generic @x response (no payload expected by client)
+            self.queue.put("@xname\n".encode())
         elif d == "kill":
             self.queue.put("@xkill\n".encode())
             self.parent.quit()
@@ -545,6 +550,12 @@ class ServerThread(threading.Thread):
         for i, t in enumerate(self.threads):
             c = OrderedDict()
             c["Client"] = t[0].addr
+            try:
+                cname = t[0].co.name
+                if cname:
+                    c["Name"] = cname
+            except Exception:
+                pass
             recv = t[0].msg_recv
             sent = t[1].msg_sent
             prev = self._last_counts.get(id(t[0]))

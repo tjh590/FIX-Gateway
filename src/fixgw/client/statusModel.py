@@ -227,6 +227,26 @@ class StatusView(QWidget):
                     d["Client Performance"] = client_perf
             except Exception:
                 pass
+
+            # Also inject local client connection names so they're visible even
+            # if the server doesn't support naming yet.
+            try:
+                local_names = OrderedDict()
+                from . import connection as _conn
+                name_data = getattr(_conn.client, "_client_name", None)
+                if name_data:
+                    local_names["Data"] = name_data
+                sc = getattr(_conn, "status_client", None)
+                if sc is not None and sc is not _conn.client:
+                    name_info = getattr(sc, "_client_name", None)
+                    if name_info:
+                        local_names["Info"] = name_info
+                if local_names:
+                    if "Client" not in d or not isinstance(d.get("Client"), dict):
+                        d["Client"] = OrderedDict()
+                    d["Client"]["Connection Names"] = local_names
+            except Exception:
+                pass
             # Preserve current expansion paths across rebuild
             restore_paths = set(self._expanded_paths) if self._expanded_paths is not None else set()
             self._populate_tree(d)
@@ -243,7 +263,17 @@ class StatusView(QWidget):
         model.setHorizontalHeaderLabels(["Key", "Value"])
 
         def add_node(parent, key, value):
-            key_item = QStandardItem(str(key))
+            # If this looks like a per-connection entry and it has a Name field,
+            # annotate the display label with the name.
+            display_key = str(key)
+            if isinstance(value, dict):
+                try:
+                    nm = value.get("Name")
+                    if nm and isinstance(nm, str) and display_key.startswith("Connection "):
+                        display_key = f"{display_key} ({nm})"
+                except Exception:
+                    pass
+            key_item = QStandardItem(display_key)
             val_item = QStandardItem("")
             # Leaf node
             if not isinstance(value, (dict, list)):

@@ -65,6 +65,12 @@ def main():
     parser.add_argument(
         "--gui", "-g", action="store_true", help="Run in graphical mode"
     )
+    parser.add_argument(
+        "--name",
+        "-n",
+        default=None,
+        help="Optional human-friendly client name to report to the server",
+    )
 
     args, unknown_args = parser.parse_known_args()
     log = logging.getLogger()
@@ -73,6 +79,12 @@ def main():
 
     c = netfix.Client(args.host, args.port)
     c.connect()
+    # Optional: name this primary connection (Data)
+    if args.name:
+        try:
+            c.setName(f"{args.name}.Data")
+        except Exception:
+            pass
 
     cmd = command.Command(c)
     # If commands are beign redirected or piped we set the prompt to nothing
@@ -89,7 +101,7 @@ def main():
     if args.gui:
         from . import gui
 
-        sys.exit(gui.main(c))
+        sys.exit(gui.main(c, args.name))
     else:
         cmd.cmdloop()
 

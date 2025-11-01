@@ -21,10 +21,7 @@ import socket
 import logging
 import time
 
-try:
-    import queue
-except:
-    import Queue as queue
+import queue
 
 log = logging.getLogger(__name__)
 
@@ -288,6 +285,7 @@ class Client:
         self.cthread.timeout = timeout
         self.cthread.daemon = True
         self.lock = threading.Lock()
+        self._client_name = None
 
     def subscribeReport(self, key, interval_ms=1000):
         with self.lock:
@@ -420,3 +418,18 @@ class Client:
         with self.lock:
             self.cthread.send("@xkill\n".encode())
             res = self.cthread.getResponse("x")
+
+    # Optional: set a human-friendly connection name on the server for this client
+    # Safe for existing servers: if unsupported, it's ignored server-side
+    def setName(self, name: str):
+        try:
+            if not name:
+                return
+            self._client_name = str(name)
+            with self.lock:
+                # Fire-and-forget, do not wait for an '@x' response to avoid
+                # interfering with other '@x' consumers like getStatus()
+                self.cthread.send(f"@xname;{self._client_name}\n".encode())
+        except Exception:
+            # Non-fatal if naming fails
+            pass

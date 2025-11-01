@@ -88,10 +88,18 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         except Exception:
             pass
 
-def main(client):
+def main(client, name=None):
     connection.initialize(client)
     app = QApplication(sys.argv)
     app.setApplicationName("FIX Gateway Client")
+    # If a name is provided, name the status (Info) connection as well
+    try:
+        if name and getattr(connection, 'status_client', None):
+            # Only name the Info connection if it's a separate socket
+            if connection.status_client is not client:
+                connection.status_client.setName(f"{name}.Info")
+    except Exception:
+        pass
 
     window = MainWindow()
     x = app.exec()
