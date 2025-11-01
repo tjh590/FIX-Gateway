@@ -266,6 +266,20 @@ class StatusView(QWidget):
             # If this looks like a per-connection entry and it has a Name field,
             # annotate the display label with the name.
             display_key = str(key)
+            # Rewrite top-level 'Connection: X' to 'Plugin: X' when there are no
+            # TCP connection details in that plugin's status. We detect this by
+            # absence of common connection fields at that node.
+            try:
+                is_top_level = parent is root
+                if is_top_level and display_key.startswith("Connection: ") and isinstance(value, dict):
+                    has_conn_fields = (
+                        ("Current Connections" in value)
+                        or any(str(k).startswith("Connection ") for k in value.keys())
+                    )
+                    if not has_conn_fields:
+                        display_key = display_key.replace("Connection:", "Plugin:", 1)
+            except Exception:
+                pass
             if isinstance(value, dict):
                 try:
                     nm = value.get("Name")
