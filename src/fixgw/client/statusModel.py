@@ -15,7 +15,7 @@
 #  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307,
 #  USA.import plugin
 
-from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal, QModelIndex
+from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal, QModelIndex, Qt, QSortFilterProxyModel
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QStandardItemModel, QStandardItem
 import json
+import os
 from collections import OrderedDict
 import threading
 import time
@@ -39,6 +40,42 @@ import fixgw.netfix as netfix
 from . import connection
 
 # TODO get the dictionary and convert to a tree view instead of just text
+
+class _TreeFilterProxyModel(QSortFilterProxyModel):
+    """Filter that matches substring in either Key or Value column.
+
+    Ensures that if a child matches, its ancestors are also accepted so the tree shows the path.
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._pattern = ""
+        try:
+            # Case-insensitive contains
+            self.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        except Exception:
+            pass
+
+    def setFilterText(self, text: str):
+        self._pattern = (text or "").strip()
+        self.invalidateFilter()
+
+    def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex) -> bool:
+        if not self._pattern:
+            return True
+        m = self.sourceModel()
+        idx_key = m.index(source_row, 0, source_parent)
+        idx_val = m.index(source_row, 1, source_parent)
+        key_txt = str(m.data(idx_key) or "")
+        val_txt = str(m.data(idx_val) or "")
+        hay = f"{key_txt} {val_txt}".lower()
+        if self._pattern.lower() in hay:
+            return True
+        # If any child matches, accept this row
+        rows = m.rowCount(idx_key)
+        for r in range(rows):
+            if self.filterAcceptsRow(r, idx_key):
+                return True
+        return False
 
 class _StatusWorker(QObject):
     got = pyqtSignal(str)
@@ -151,7 +188,7 @@ class _PerfMonitor(QObject):
         return d
 
 class StatusView(QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, client_name: str | None = None):
         super(StatusView, self).__init__(parent)
         # Layout with controls + tree view
         self._root_layout = QVBoxLayout(self)
@@ -168,6 +205,20 @@ class StatusView(QWidget):
         controls.addWidget(self._btn_expand)
         controls.addWidget(self._btn_collapse)
         controls.addStretch(1)
+        # Quick filter box
+        try:
+            from PyQt6.QtWidgets import QLineEdit, QLabel
+            self._filter_row = QHBoxLayout()
+            self._filter_row.setContentsMargins(0, 0, 0, 0)
+            self._filter_row.setSpacing(6)
+            self._filter_label = QLabel("Filter:", self)
+            self._filter_edit = QLineEdit(self)
+            self._filter_edit.setPlaceholderText("Search keys and values…")
+            self._filter_row.addWidget(self._filter_label)
+            self._filter_row.addWidget(self._filter_edit, 1)
+            self._root_layout.addLayout(self._filter_row)
+        except Exception:
+            self._filter_edit = None
 
         self._tree = QTreeView(self)
         self._tree.setAlternatingRowColors(True)
@@ -176,13 +227,33 @@ class StatusView(QWidget):
         self._tree.setEditTriggers(QTreeView.EditTrigger.NoEditTriggers)
         self._model = QStandardItemModel(self)
         self._model.setHorizontalHeaderLabels(["Key", "Value"])
-        self._tree.setModel(self._model)
+        # Proxy for filtering
+        try:
+            from PyQt6.QtCore import QSortFilterProxyModel
+            self._proxy = _TreeFilterProxyModel(self)
+            self._proxy.setSourceModel(self._model)
+            self._tree.setModel(self._proxy)
+        except Exception:
+            self._proxy = None
+            self._tree.setModel(self._model)
 
         self._root_layout.addLayout(controls)
         self._root_layout.addWidget(self._tree)
         self.connected = False
         self._perf = _PerfMonitor(self, tick_ms=100)
+        # Client identity for persistence (None -> 'noname')
+        self._client_name = client_name or "noname"
         self._expanded_paths = set()
+        self._expanded_paths_unfiltered = set()
+        self._pending_column_widths = []
+        # Load any persisted state early; it will be applied after the first model build
+        try:
+            st = self._load_persisted_state()
+            if st and st.get("paths"):
+                self._expanded_paths = st.get("paths", set())
+            self._pending_column_widths = st.get("columns", []) if st else []
+        except Exception:
+            self._pending_column_widths = []
 
         # Track user expand/collapse interactions to persist across updates
         try:
@@ -191,6 +262,22 @@ class StatusView(QWidget):
         except Exception:
             pass
 
+        # Apply persisted column widths if present
+        try:
+            if isinstance(self._pending_column_widths, list):
+                if len(self._pending_column_widths) >= 1:
+                    self._tree.setColumnWidth(0, int(self._pending_column_widths[0]))
+                if len(self._pending_column_widths) >= 2:
+                    self._tree.setColumnWidth(1, int(self._pending_column_widths[1]))
+        except Exception:
+            pass
+
+        # Wire filter behavior
+        try:
+            if self._filter_edit is not None and self._proxy is not None:
+                self._filter_edit.textChanged.connect(self._on_filter_changed)
+        except Exception:
+            pass
         #self.timer = QTimer()
         #self.timer.setInterval(1000)
         #self.timer.timeout.connect(self.update)
@@ -283,11 +370,28 @@ class StatusView(QWidget):
             if isinstance(value, dict):
                 try:
                     nm = value.get("Name")
-                    if nm and isinstance(nm, str) and display_key.startswith("Connection "):
-                        display_key = f"{display_key} ({nm})"
+                    cli = value.get("Client")
+                    ip_port = None
+                    if isinstance(cli, (list, tuple)) and len(cli) >= 2:
+                        ip_port = f"{cli[0]}:{cli[1]}"
+                    elif isinstance(cli, str):
+                        # If server encoded as string already
+                        ip_port = cli
+                    if display_key.startswith("Connection "):
+                        if nm and ip_port:
+                            display_key = f"{display_key} ({nm} @ {ip_port})"
+                        elif nm:
+                            display_key = f"{display_key} ({nm})"
+                        elif ip_port:
+                            display_key = f"{display_key} ({ip_port})"
                 except Exception:
                     pass
             key_item = QStandardItem(display_key)
+            # Store a stable token (original key) to ensure exact restore
+            try:
+                key_item.setData(str(key), int(Qt.ItemDataRole.UserRole))
+            except Exception:
+                pass
             val_item = QStandardItem("")
             # Leaf node
             if not isinstance(value, (dict, list)):
@@ -317,7 +421,11 @@ class StatusView(QWidget):
             add_node(root, "root", data)
 
         self._model = model
-        self._tree.setModel(self._model)
+        if self._proxy is not None:
+            self._proxy.setSourceModel(self._model)
+            self._tree.setModel(self._proxy)
+        else:
+            self._tree.setModel(self._model)
 
     # --- Expansion state persistence helpers ---
     def _index_to_path(self, index: QModelIndex):
@@ -326,10 +434,13 @@ class StatusView(QWidget):
         except Exception:
             idx = index
         path = []
-        m = self._model
+        # Use the view's model (proxy-aware) when reading keys
+        m = self._tree.model() if hasattr(self._tree, "model") else self._model
         while idx.isValid():
             try:
-                key = m.data(idx)
+                key = m.data(idx, int(Qt.ItemDataRole.UserRole))
+                if key is None:
+                    key = m.data(idx)
             except Exception:
                 key = None
             path.append(str(key))
@@ -338,13 +449,17 @@ class StatusView(QWidget):
 
     def _get_expanded_paths(self):
         paths = set()
-        m = self._model
+        # Work on the view's model (proxy-aware)
+        vm = self._tree.model() if hasattr(self._tree, "model") else self._model
+        m = vm
 
         def visit(parent_idx: QModelIndex, parent_path: tuple):
             rows = m.rowCount(parent_idx)
             for r in range(rows):
                 idx = m.index(r, 0, parent_idx)
-                key = m.data(idx)
+                key = m.data(idx, int(Qt.ItemDataRole.UserRole))
+                if key is None:
+                    key = m.data(idx)
                 this_path = parent_path + (str(key),)
                 if self._tree.isExpanded(idx):
                     paths.add(this_path)
@@ -354,13 +469,17 @@ class StatusView(QWidget):
         return paths
 
     def _restore_expanded_paths(self, paths: set):
-        m = self._model
+        # Work on the view's model (proxy-aware)
+        vm = self._tree.model() if hasattr(self._tree, "model") else self._model
+        m = vm
 
         def visit(parent_idx: QModelIndex, parent_path: tuple):
             rows = m.rowCount(parent_idx)
             for r in range(rows):
                 idx = m.index(r, 0, parent_idx)
-                key = m.data(idx)
+                key = m.data(idx, int(Qt.ItemDataRole.UserRole))
+                if key is None:
+                    key = m.data(idx)
                 this_path = parent_path + (str(key),)
                 if this_path in paths:
                     try:
@@ -405,6 +524,27 @@ class StatusView(QWidget):
         except Exception:
             pass
 
+    # --- Filter handlers ---
+    def _on_filter_changed(self, text: str):
+        try:
+            if self._proxy is None:
+                return
+            t = (text or "").strip()
+            if t:
+                # Save unfiltered expansion once when entering filtered state
+                if not self._expanded_paths_unfiltered:
+                    self._expanded_paths_unfiltered = set(self._expanded_paths)
+                self._proxy.setFilterText(t)
+                self._tree.expandAll()
+            else:
+                self._proxy.setFilterText("")
+                # Restore previous expansion state
+                if self._expanded_paths_unfiltered:
+                    self._restore_expanded_paths(self._expanded_paths_unfiltered)
+                self._expanded_paths_unfiltered.clear()
+        except Exception:
+            pass
+
     # def __init__(self, parent=None):
     #     super(StatusView, self).__init__(parent)
     #     self.setWidgetResizable(True)
@@ -426,6 +566,11 @@ class StatusView(QWidget):
     #    self.timer.stop()
 
     def shutdown(self):
+        # Persist expansion state and column widths before shutting down
+        try:
+            self._save_persisted_state()
+        except Exception:
+            pass
         # Stop timers first
         try:
             if hasattr(self, "_timer"):
@@ -443,5 +588,66 @@ class StatusView(QWidget):
             if hasattr(self, "_t") and self._t is not None:
                 self._t.quit()
                 self._t.wait(2000)
+        except Exception:
+            pass
+
+    # --- Persistence helpers ---
+    def _persist_dir(self) -> str:
+        # Always use ~/.config/fixgwclient
+        path = os.path.join(os.path.expanduser("~"), ".config", "fixgwclient")
+        try:
+            os.makedirs(path, exist_ok=True)
+        except Exception:
+            pass
+        return path
+
+    def _persist_file(self) -> str:
+        name = self._client_name or "noname"
+        safe = "".join(ch if (ch.isalnum() or ch in ("-", "_", ".")) else "_" for ch in str(name))
+        return os.path.join(self._persist_dir(), f"status_state_{safe}.json")
+
+    def _load_persisted_state(self) -> dict:
+        fn = self._persist_file()
+        try:
+            if not os.path.isfile(fn):
+                # Backward-compat: try old filename if present
+                old_fn = os.path.join(self._persist_dir(), os.path.basename(fn).replace("status_state_", "status_expansion_"))
+                if os.path.isfile(old_fn):
+                    fn = old_fn
+                else:
+                    return {}
+            with open(fn, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            paths = payload.get("paths", [])
+            s = set()
+            for p in paths:
+                try:
+                    s.add(tuple(str(x) for x in p))
+                except Exception:
+                    continue
+            columns = payload.get("columns", [])
+            return {"paths": s, "columns": columns}
+        except Exception:
+            return {}
+
+    def _save_persisted_state(self):
+        # Prefer unfiltered expansion snapshot if present
+        paths_set = self._expanded_paths_unfiltered if self._expanded_paths_unfiltered else self._expanded_paths
+        try:
+            columns = [
+                int(self._tree.columnWidth(0)),
+                int(self._tree.columnWidth(1)),
+            ]
+        except Exception:
+            columns = []
+        try:
+            payload = {
+                "version": 2,
+                "paths": [list(p) for p in sorted(paths_set)],
+                "columns": columns,
+            }
+            fn = self._persist_file()
+            with open(fn, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2)
         except Exception:
             pass

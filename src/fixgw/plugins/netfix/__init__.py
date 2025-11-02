@@ -34,6 +34,7 @@ import time
 
 # Track where data came from to prevent loops
 client_block = defaultdict(set)
+client_block_lock = threading.Lock()
 
 
 # This holds the data and functions that are needed by both connection threads.
@@ -54,6 +55,16 @@ class Connection(object):
         self.subscriptions = set()
         self.output_inhibit = False
         self.report_subs = {}  # key -> {"period": seconds, "last": last_sent_epoch}
+
+    def _block_key(self):
+        """Unique identifier used for loop-prevention for this connection.
+        Use IP:port rather than just IP so multiple clients from the same IP
+        don't suppress each other.
+        """
+        try:
+            return f"{self.addr[0]}:{self.addr[1]}"
+        except Exception:
+            return str(self.addr[0])
 
     # This sends a standard Net-FIX value update message to the queue.
     def __send_value(self, id, value):
@@ -150,7 +161,8 @@ class Connection(object):
             self.queue.put("@xkill\n".encode())
             self.parent.quit()
         else:
-            self.queue.put("@x{}!001".format(d).encode())
+            # Ensure newline so client parsers don't stall
+            self.queue.put("@x{}!001\n".format(d).encode())
 
     def __flag(self, d):
         a = d.split(";")
@@ -188,8 +200,12 @@ class Connection(object):
             return
         try:
             self.output_inhibit = True
-            # Track inputs so we do not send back to same client
-            client_block[self.addr[0]].add(a[0])
+            # Track inputs so we do not send back to the same client connection
+            try:
+                with client_block_lock:
+                    client_block[self._block_key()].add(a[0])
+            except Exception:
+                pass
             self.parent.db_write(a[0], a[1])
         except KeyError:
             self.queue.put("@w{0}!001\n".format(a[0]).encode())
@@ -317,8 +333,12 @@ class Connection(object):
                         # self.output_inhibit = True
                         item.secfail = False
                 self.output_inhibit = True
-                # Track inputs so we do not send back to same client
-                client_block[self.addr[0]].add(x[0])
+                # Track inputs so we do not send back to the same client connection
+                try:
+                    with client_block_lock:
+                        client_block[self._block_key()].add(x[0])
+                except Exception:
+                    pass
                 self.parent.db_write(x[0], x[1])
             except Exception as e:
                 # We pretty much ignore this stuff for now
@@ -503,14 +523,21 @@ class ServerThread(threading.Thread):
                             each[1].join()
                         break
                     # General thread maintainance
-                    for each in self.threads:
+                    to_remove = []
+                    for each in list(self.threads):
                         # The receive thread will stop running when the client closes
-                        # This shoudl stop the send thread and clean it all up.
+                        # This should stop the send thread and clean it all up.
                         if not each[0].running:
                             each[0].join()
                             each[1].stop()
                             each[1].join()
-                            self.threads.remove(each)
+                            to_remove.append(each)
+                    if to_remove:
+                        for each in to_remove:
+                            try:
+                                self.threads.remove(each)
+                            except ValueError:
+                                pass
 
                     # periodic report subscription push        
                     now = time.time()
@@ -610,12 +637,24 @@ class ClientThread(threading.Thread):
                 key = self.queue.popleft()
                 for c in self.clients:
                     try:
-                        # Block sending back to self
-                        if key not in client_block[c.cthread.host]:
+                        # Block sending back to the same remote connection only.
+                        # Use the same ip:port scheme as the server's Connection._block_key().
+                        block_id = f"{getattr(c.cthread, 'host', '')}:{getattr(c.cthread, 'port', '')}"
+                        allow = True
+                        try:
+                            with client_block_lock:
+                                allow = key not in client_block[block_id]
+                        except Exception:
+                            pass
+                        if allow:
                             c.writeValue(key, self.parent.db_read(key)[0])
                         else:
                             # Remove the block since we just blocked it
-                            client_block[c.cthread.host].discard(key)
+                            try:
+                                with client_block_lock:
+                                    client_block[block_id].discard(key)
+                            except Exception:
+                                pass
                     except Exception as e:
                         if key not in self.queue:
                             self.queue.append(key)
