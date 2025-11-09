@@ -1,4 +1,14 @@
 demo:
   load: DEMO
   module: fixgw.plugins.demo
-
+  engine_sim:
+    rpm_mean: 2400
+    rpm_amp: 200
+    rpm_period: 45
+    egt_amp: 50
+    cht_amp: 25
+    fuel_drain:
+    enabled: true
+    tanks: [FUELQ1, FUELQ2, FUELQ3]
+    weights: [0.5, 0.3, 0.2]
+    rate_gph: 9.0

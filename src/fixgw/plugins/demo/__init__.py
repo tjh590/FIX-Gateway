@@ -25,6 +25,7 @@
 
 import threading
 import time
+import math
 from collections import OrderedDict
 import fixgw.plugin as plugin
 
@@ -633,9 +634,119 @@ class MainThread(threading.Thread):
             },
             {"MAVMSG": "NO DATA"},
         ]
+        # Engine keys we will continuously simulate regardless of script entries
+        # Build dynamic list of cylinders by checking database for defined keys (support up to 12)
+        self.cylinders = []
+        for i in range(1, 13):
+            egt_key = f"EGT1{i}"
+            cht_key = f"CHT1{i}"
+            try:
+                # Will raise if key doesn't exist in DB
+                self.parent.db_get_item(egt_key)
+                self.parent.db_get_item(cht_key)
+                self.cylinders.append(i)
+            except Exception:
+                continue
+        # Engine keys (primary metrics + per-cylinder temps)
+        self.engine_keys = {
+            "TACH1",
+            "MAP1",
+            "FUELP1",
+            "OILP1",
+            "OILT1",
+            "FUELF1",
+        }
+        for i in self.cylinders:
+            self.engine_keys.add(f"EGT1{i}")
+            self.engine_keys.add(f"CHT1{i}")
+
+        # Continuous engine simulation parameters
+        self._engine_start = time.time()
+        # State for slow-moving temps
+        self._oilt = self.keylist.get("OILT1", 90.0)
+        self._cht = {}
+        self._egt = {}
+        for i in self.cylinders:
+            self._cht[f"CHT1{i}"] = self.keylist.get(f"CHT1{i}", 200.0)
+            self._egt[f"EGT1{i}"] = self.keylist.get(f"EGT1{i}", 650.0)
+        # Independent phases so cylinders aren't identical
+        self._phase = {}
+        # Assign phase offsets evenly around a circle for variability
+        if self.cylinders:
+            for idx, cyl in enumerate(self.cylinders):
+                # Spread phases 0..2π
+                base_phase = (idx / len(self.cylinders)) * 2.0 * math.pi
+                self._phase[f"EGT1{cyl}"] = base_phase
+                self._phase[f"CHT1{cyl}"] = base_phase * 0.5  # slower differing phase
         # Initialize the points
         for each in self.keylist:
             self.parent.db_write(each, self.keylist[each])
+
+        # Configuration for engine simulation and fuel drain
+        self._cfg_engine = getattr(self.parent, "config", {}).get("engine_sim", {})
+        self._cfg_fuel = getattr(self.parent, "config", {}).get("fuel_drain", {})
+
+        # General timing configuration
+        cfg = getattr(self.parent, "config", {})
+        self._tick_hz = float(cfg.get("tick_rate_hz", 10.0))
+        if self._tick_hz <= 0:
+            self._tick_hz = 10.0
+        self._tick_dt = 1.0 / self._tick_hz
+        self._segment_steps = int(cfg.get("segment_steps", 20))
+        if self._segment_steps < 1:
+            self._segment_steps = 20
+
+        # Engine sim config with defaults
+        self._rpm_mean = float(self._cfg_engine.get("rpm_mean", 2450.0))
+        self._rpm_amp = float(self._cfg_engine.get("rpm_amp", 250.0))
+        self._rpm_period = float(self._cfg_engine.get("rpm_period", 60.0))
+
+        self._map_base = float(self._cfg_engine.get("map_base", 18.0))
+        self._map_amp = float(self._cfg_engine.get("map_amp", 6.0))
+        self._map_period = float(self._cfg_engine.get("map_period", 45.0))
+        self._map_rpm_coeff = float(self._cfg_engine.get("map_rpm_coeff", 0.004))
+
+        self._oilp_base = float(self._cfg_engine.get("oilp_base", 55.0))
+        self._oilp_amp = float(self._cfg_engine.get("oilp_amp", 8.0))
+        self._oilp_period = float(self._cfg_engine.get("oilp_period", 50.0))
+        self._oilp_rpm_coeff = float(self._cfg_engine.get("oilp_rpm_coeff", 0.003))
+
+        self._fuelf_base = float(self._cfg_engine.get("fuelf_base", 7.5))
+        self._fuelf_amp = float(self._cfg_engine.get("fuelf_amp", 1.5))
+        self._fuelf_period = float(self._cfg_engine.get("fuelf_period", 60.0))
+        self._fuelf_rpm_coeff = float(self._cfg_engine.get("fuelf_rpm_coeff", 0.0015))
+
+        self._oilt_base = float(self._cfg_engine.get("oilt_base", 85.0))
+        self._oilt_rpm_coeff = float(self._cfg_engine.get("oilt_rpm_coeff", 0.01))
+        self._oilt_sin_amp = float(self._cfg_engine.get("oilt_sin_amp", 5.0))
+        self._oilt_sin_period = float(self._cfg_engine.get("oilt_sin_period", 180.0))
+        self._oilt_alpha = float(self._cfg_engine.get("oilt_alpha", 0.02))
+
+        self._egt_base = float(self._cfg_engine.get("egt_base", 650.0))
+        self._egt_amp = float(self._cfg_engine.get("egt_amp", 40.0))
+        self._egt_period = float(self._cfg_engine.get("egt_period", 30.0))
+
+        self._cht_base = float(self._cfg_engine.get("cht_base", 200.0))
+        self._cht_amp = float(self._cfg_engine.get("cht_amp", 20.0))
+        self._cht_period = float(self._cfg_engine.get("cht_period", 120.0))
+        self._cht_oilt_coeff = float(self._cfg_engine.get("cht_oilt_coeff", 0.05))
+        self._cht_alpha = float(self._cfg_engine.get("cht_alpha", 0.02))
+
+        # Fuel drain configuration
+        self._fuel_enabled = bool(self._cfg_fuel.get("enabled", False))
+        # Tanks to drain; default to detected FUELQ1..FUELQ3 in keylist order
+        default_tanks = [k for k in ["FUELQ1", "FUELQ2", "FUELQ3", "FUELQ4"] if k in self.keylist]
+        self._fuel_tanks = list(self._cfg_fuel.get("tanks", default_tanks))
+        # Rate in gallons per hour (total across all tanks)
+        self._fuel_rate_gph = float(self._cfg_fuel.get("rate_gph", 8.0))
+        # Distribution weights (same length as tanks); if not provided, equal split
+        if "weights" in self._cfg_fuel:
+            self._fuel_weights = list(self._cfg_fuel.get("weights"))
+        else:
+            self._fuel_weights = [1.0 / max(1, len(self._fuel_tanks))] * max(1, len(self._fuel_tanks))
+        # Normalize weights to sum=1 to avoid surprises
+        s = sum(self._fuel_weights) or 1.0
+        self._fuel_weights = [w / s for w in self._fuel_weights]
 
     def run(self):
         count = 0
@@ -644,7 +755,7 @@ class MainThread(threading.Thread):
         while not self.getout:
             count += 1
             script_when += 1
-            time.sleep(0.1)
+            time.sleep(self._tick_dt)
             touched = set()
 
             # print(f"script_when:{script_when}, script_count:{script_count}")
@@ -655,6 +766,9 @@ class MainThread(threading.Thread):
             if script_when == 0:
                 script_count += 1
                 for k, v in self.script[script_count].items():
+                    # Skip script assigning engine keys; we provide continuous simulation for them
+                    if k in self.engine_keys:
+                        continue
                     if not isinstance(v, str):
                         self.parent.db_write(k, v)
                         touched.add(k)
@@ -663,14 +777,22 @@ class MainThread(threading.Thread):
             else:
                 if script_count < len(self.script):
                     for k, v in self.script[script_count].items():
+                        # Skip engine keys in interpolation as well
+                        if k in self.engine_keys:
+                            continue
                         if not isinstance(v, str):
                             nxt = self.script[script_count + 1].get(k, None)
                             if nxt is not None:
-                                val = (((nxt - v) / 20) * script_when) + v
+                                val = (((nxt - v) / self._segment_steps) * script_when) + v
                                 self.parent.db_write(k, val)
                                 touched.add(k)
-                if script_when == 19:
+                if script_when == (self._segment_steps - 1):
                     script_when = -1
+
+            # Continuous engine simulation updates every tick
+            self._update_engine(touched)
+            # Optional fuel drain simulation every tick
+            self._update_fuel(touched, dt=self._tick_dt)
                     
             for each in self.keylist:
                 if each in touched:
@@ -686,6 +808,81 @@ class MainThread(threading.Thread):
 
     def stop(self):
         self.getout = True
+
+    # --- Internal helpers ---
+    def _update_engine(self, touched):
+        """Continuously update engine-related keys to avoid long flat periods.
+        Generates smooth variations using simple sinusoids and slow integrators.
+        """
+        now = time.time()
+        t = now - self._engine_start
+        # RPM around mean ± amp with configured period
+        rpm = self._rpm_mean + self._rpm_amp * math.sin(2.0 * math.pi * (t / max(1e-6, self._rpm_period)))
+        # MAP loosely correlated with RPM
+        map1 = self._map_base + self._map_amp * math.sin(2.0 * math.pi * (t / max(1e-6, self._map_period))) + self._map_rpm_coeff * (rpm - self._rpm_mean)
+        # Oil pressure correlated to RPM with a little ripple
+        oilp = self._oilp_base + self._oilp_amp * math.sin(2.0 * math.pi * (t / max(1e-6, self._oilp_period))) + self._oilp_rpm_coeff * (rpm - self._rpm_mean)
+        # Fuel flow roughly proportional to power
+        fuelf = self._fuelf_base + self._fuelf_amp * math.sin(2.0 * math.pi * (t / max(1e-6, self._fuelf_period))) + self._fuelf_rpm_coeff * (rpm - self._rpm_mean)
+
+        # Oil temp: slow-moving towards a target based on power and long-period variation
+        target_oilt = self._oilt_base + self._oilt_rpm_coeff * (rpm - self._rpm_mean) + self._oilt_sin_amp * math.sin(2.0 * math.pi * (t / max(1e-6, self._oilt_sin_period)))
+        self._oilt += (target_oilt - self._oilt) * self._oilt_alpha  # slow approach
+
+        # Cylinder/EGT temps per cylinder with phase offsets
+        for cyl in self.cylinders:
+            egt_key = f"EGT1{cyl}"
+            cht_key = f"CHT1{cyl}"
+            phase_egt = self._phase.get(egt_key, 0.0)
+            phase_cht = self._phase.get(cht_key, 0.0)
+            egt = self._egt_base + self._egt_amp * math.sin(2.0 * math.pi * (t / max(1e-6, self._egt_period)) + phase_egt)
+            target_cht = self._cht_base + self._cht_amp * math.sin(2.0 * math.pi * (t / max(1e-6, self._cht_period)) + phase_cht) + self._cht_oilt_coeff * (self._oilt - self._oilt_base)
+            self._cht[cht_key] += (target_cht - self._cht[cht_key]) * self._cht_alpha
+            if egt_key in self.engine_keys:
+                self.parent.db_write(egt_key, egt)
+                touched.add(egt_key)
+            if cht_key in self.engine_keys:
+                self.parent.db_write(cht_key, self._cht[cht_key])
+                touched.add(cht_key)
+
+        # Fuel pressure follows fuel flow weakly with small ripple
+        fuelp = 28.0 + 0.5 * math.sin(2.0 * math.pi * (t / 35.0)) + 0.02 * (fuelf - self._fuelf_base)
+
+        # Write primary engine keys
+        for key, val in (
+            ("TACH1", rpm),
+            ("MAP1", map1),
+            ("OILP1", oilp),
+            ("OILT1", self._oilt),
+            ("FUELF1", fuelf),
+            ("FUELP1", fuelp),
+        ):
+            if key in self.engine_keys:
+                self.parent.db_write(key, val)
+                touched.add(key)
+
+    def _update_fuel(self, touched, dt: float = 1.0):
+        """Simulate draining fuel from configured tanks.
+        dt is the elapsed time in seconds for this update (0.1 per tick).
+        """
+        if not self._fuel_enabled or not self._fuel_tanks:
+            return
+        # gallons per second total
+        gps = self._fuel_rate_gph / 3600.0
+        for idx, tank in enumerate(self._fuel_tanks):
+            try:
+                w = self._fuel_weights[idx] if idx < len(self._fuel_weights) else 0.0
+            except Exception:
+                w = 0.0
+            if w <= 0.0:
+                continue
+            try:
+                current = self.parent.db_read(tank)[0]
+            except Exception:
+                continue
+            newv = max(0.0, float(current) - gps * w * dt)
+            self.parent.db_write(tank, newv)
+            touched.add(tank)
 
 
 class Plugin(plugin.PluginBase):
