@@ -206,6 +206,52 @@ Error Codes:
 
 * 001 - ID Not Found
 
+Report Subscription
+~~~~~~~~~~~~~~~~~~~
+
+``Q`` = Subscribe to periodic item reports. This allows a client to request
+the server to push item report frames at a specified interval.
+
+Client command:
+
+::
+
+  @Q<id>;<period_ms>
+
+Where ``<id>`` is the database key and ``<period_ms>`` is the desired period in
+milliseconds (minimum 100 ms). The server acknowledges with:
+
+::
+
+  @Q<id>
+
+Once subscribed, the server will periodically push report frames prefixed with
+``#`` instead of ``@``. These push frames include the standard report fields
+plus extended rate statistics when available.
+
+Server push frame format:
+
+::
+
+  #q<id>;desc;type;min;max;units;tol;aux;last_writer;rate_min;rate_max;rate_avg;rate_stdev;rate_samples
+
+Where the additional fields are:
+
+* ``last_writer``: A textual identifier of the last writer (when available)
+* ``rate_min``: Minimum observed update period in seconds
+* ``rate_max``: Maximum observed update period in seconds
+* ``rate_avg``: Average update period in seconds
+* ``rate_stdev``: Standard deviation of update periods in seconds
+* ``rate_samples``: Number of samples contributing to the statistics
+
+To unsubscribe from a report, send:
+
+::
+
+  @UQ<id>
+
+and the server will acknowledge with ``@UQ<id>``.
+
 Flags Command
 ~~~~~~~~~~~~~
 

@@ -83,7 +83,7 @@ class Connection(object):
         self.queue.put(st.encode())
 
     # Add a prefix parameter to the server’s report sender and use “#” for periodic push.
-    # Keep “@q” for normal @q replies so existing clients still work.
+    # Keep legacy format for normal "@q" replies so existing clients and tests still work.
     def __send_report(self, id, prefix="@"):
         try:
             x = self.parent.db_get_item(id)
@@ -94,32 +94,43 @@ class Connection(object):
                 if len(a) > 0:
                     a = a + ","
                 a = a + each
+            if prefix == "@":
+                # Legacy 7-field report: desc; type; min; max; units; tol; aux-list
+                s = (
+                    f"{prefix}q{id};{x.description};{x.typestring};{x.min};{x.max};"
+                    f"{x.units};{x.tol};{a}\n"
+                )
+                self.queue.put(s.encode())
+            else:
+                # Extended stats for periodic/reporting push
+                stats = x.get_rate_stats()
+                last_writer = ""
+                rate_min = ""
+                rate_max = ""
+                rate_avg = ""
+                rate_stdev = ""
+                rate_samples = "0"
+                if stats:
+                    if stats.get("last_writer"):
+                        last_writer = str(stats["last_writer"])
+                    if stats.get("min") is not None:
+                        rate_min = "{:.6f}".format(stats["min"])
+                    if stats.get("max") is not None:
+                        rate_max = "{:.6f}".format(stats["max"])
+                    if stats.get("avg") is not None:
+                        rate_avg = "{:.6f}".format(stats["avg"])
+                    if stats.get("stdev") is not None:
+                        rate_stdev = "{:.6f}".format(stats["stdev"])
+                    if stats.get("samples") is not None:
+                        rate_samples = str(stats["samples"])
+                elif x.last_writer:
+                    last_writer = str(x.last_writer)
 
-            stats = x.get_rate_stats()
-            last_writer = ""
-            rate_min = ""
-            rate_max = ""
-            rate_avg = ""
-            rate_stdev = ""
-            rate_samples = "0"
-            if stats:
-                if stats.get("last_writer"):
-                    last_writer = str(stats["last_writer"])
-                if stats.get("min") is not None:
-                    rate_min = "{:.6f}".format(stats["min"])
-                if stats.get("max") is not None:
-                    rate_max = "{:.6f}".format(stats["max"])
-                if stats.get("avg") is not None:
-                    rate_avg = "{:.6f}".format(stats["avg"])
-                if stats.get("stdev") is not None:
-                    rate_stdev = "{:.6f}".format(stats["stdev"])
-                if stats.get("samples") is not None:
-                    rate_samples = str(stats["samples"])
-            elif x.last_writer:
-                last_writer = str(x.last_writer)
-
-            s = f"{prefix}q{id};{x.description};{x.typestring};{x.min};{x.max};{x.units};{x.tol};{a};{last_writer};{rate_min};{rate_max};{rate_avg};{rate_stdev};{rate_samples}\n"
-            self.queue.put(s.encode())
+                s = (
+                    f"{prefix}q{id};{x.description};{x.typestring};{x.min};{x.max};{x.units};{x.tol};{a};"
+                    f"{last_writer};{rate_min};{rate_max};{rate_avg};{rate_stdev};{rate_samples}\n"
+                )
+                self.queue.put(s.encode())
         except KeyError:
             self.queue.put(f"@q{id}!001\n".encode())
 
@@ -161,8 +172,8 @@ class Connection(object):
             self.queue.put("@xkill\n".encode())
             self.parent.quit()
         else:
-            # Ensure newline so client parsers don't stall
-            self.queue.put("@x{}!001\n".format(d).encode())
+            # For unknown @x subcommands, tests expect no trailing newline
+            self.queue.put("@x{}!001".format(d).encode())
 
     def __flag(self, d):
         a = d.split(";")
@@ -276,8 +287,6 @@ class Connection(object):
                 self.__flag(d[2:])
             elif d[1] == "w":
                 self.__writeValue(d[2:])
-            elif d[1] == "q":
-                self.__send_report(id)  # replies stay as '@q...'
             elif d[1] == "Q":  # subscribe to reports
                 parts = d[2:].split(";")
                 key = parts[0]
