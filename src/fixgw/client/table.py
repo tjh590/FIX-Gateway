@@ -40,10 +40,10 @@ _COLS = [
     "Fail",
     "SFail",
     "Writer",
-    "Rate Avg",
-    "Rate Min",
-    "Rate Max",
-    "Rate Std",
+    "Rate Avg (Hz)",
+    "Rate Min (Hz)",
+    "Rate Max (Hz)",
+    "Rate SDev (Hz)",
     "Samples",
     "Description",
 ]
@@ -247,14 +247,33 @@ class DataTable(QTableView):
         # Column sizing: set reasonable defaults
         hh = self.horizontalHeader()
         hh.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        if len(_COLS) >= 13:
-            hh.setStretchLastSection(True)
-            self.setColumnWidth(0, 120)  # Value
-            self.setColumnWidth(6, 120)  # Writer
-            for c in (7, 8, 9, 10, 11):
-                self.setColumnWidth(c, 90)
-            for c in (1, 2, 3, 4, 5):
-                self.setColumnWidth(c, 55)
+        # Auto-size columns to fit header text (plus padding), then allow user adjustment.
+        try:
+            fm = self.fontMetrics()
+            padding = 20  # extra space for sort indicators / readability
+            for col, header in enumerate(_COLS):
+                w = fm.horizontalAdvance(header) + padding
+                # Ensure a reasonable minimum width for value/stat columns
+                if col == 0:  # Value column tends to hold numbers
+                    w = max(w, 100)
+                elif col == 6:  # Writer column may have names
+                    w = max(w, 110)
+                elif col in (7, 8, 9, 10, 11):  # rate/stat columns
+                    w = max(w, 95)
+                elif col in (1, 2, 3, 4, 5):  # boolean indicators
+                    w = max(w, 55)
+                self.setColumnWidth(col, w)
+            hh.setStretchLastSection(True)  # Description column stretches to fill
+        except Exception:
+            # Fallback to previous static sizing on failure
+            if len(_COLS) >= 13:
+                hh.setStretchLastSection(True)
+                self.setColumnWidth(0, 120)
+                self.setColumnWidth(6, 120)
+                for c in (7, 8, 9, 10, 11):
+                    self.setColumnWidth(c, 90)
+                for c in (1, 2, 3, 4, 5):
+                    self.setColumnWidth(c, 55)
         # Coalesce frequent updates into periodic model flushes
         self._flush_timer = QTimer(self)
         self._flush_timer.setInterval(50)  # 20 Hz UI update cap

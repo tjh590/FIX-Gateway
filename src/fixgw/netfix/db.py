@@ -501,6 +501,9 @@ class Database(object):
         self._stats_dirty = set()
         # Max number of @q reports per second; keep low to reduce lock holds
         self._max_stats_refresh = 50
+        # When True, we have active server-pushed report updates (#q),
+        # so we can avoid polling stats via @q to prevent clearing fields.
+        self._has_report_push = False
         if self.client.isConnected():
             self.initialize()
             self.connected = True
@@ -557,30 +560,35 @@ class Database(object):
         else:
             if not self.connected:
                 return
-            # Refresh a limited number of stats per cycle to avoid CPU spikes
-            keys_to_refresh = []
-            with self._stats_lock:
-                while self._stats_dirty and len(keys_to_refresh) < self._max_stats_refresh:
-                    keys_to_refresh.append(self._stats_dirty.pop())
+            # If we are receiving pushed reports (#q), avoid polling stats via
+            # legacy @q (which lacks extended fields) to prevent clearing values.
+            if not self._has_report_push:
+                # Refresh a limited number of stats per cycle to avoid CPU spikes
+                keys_to_refresh = []
+                with self._stats_lock:
+                    while self._stats_dirty and len(keys_to_refresh) < self._max_stats_refresh:
+                        keys_to_refresh.append(self._stats_dirty.pop())
 
-            for key in keys_to_refresh:
-                item = self.__items.get(key)
-                if item is None:
-                    continue
-                try:
-                    response = self.client.getReport(key)
-                    report = fixgw.netfix.Report(response)
-                    item.update_stats_from_report(report)
-                except Exception as exc:
-                    log.debug("Unable to refresh stats for %s: %s", key, exc)
-                    with self._stats_lock:
-                        self._stats_dirty.add(key)
+                for key in keys_to_refresh:
+                    item = self.__items.get(key)
+                    if item is None:
+                        continue
+                    try:
+                        response = self.client.getReport(key)
+                        report = fixgw.netfix.Report(response)
+                        item.update_stats_from_report(report)
+                    except Exception as exc:
+                        log.debug("Unable to refresh stats for %s: %s", key, exc)
+                        with self._stats_lock:
+                            self._stats_dirty.add(key)
 
     def _on_report(self, payload):
         # payload: "<key>;<desc>;...;last_writer;min;max;avg;stdev;samples"
         fields = payload.split(";")
         if not fields:
             return
+        # We've received at least one pushed report; enable push mode
+        self._has_report_push = True
         key = fields[0]
         item = self.__items.get(key)
         if not item:
@@ -684,6 +692,13 @@ class Database(object):
 
     # Subscribe to the point for value updates only (no report push)
         self.client.subscribe(key)
+        # Also subscribe to periodic report pushes with extended stats so
+        # the UI can render Writer and rate fields without polling.
+        try:
+            self.client.subscribeReport(key, interval_ms=1000)
+        except Exception:
+            # Older servers may not support @Q/@UQ; ignore failures gracefully.
+            pass
         self.__items[key] = item
         return item
 
