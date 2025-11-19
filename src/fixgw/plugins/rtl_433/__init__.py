@@ -242,6 +242,10 @@ class MainThread(threading.Thread):
         self.parent = parent  # Parent plugin object
         self.simulate = self.parent.config.get("simulate", False)
         self.process = None
+        # Optional external queue (in tests) for feeding lines directly
+        # The test fixture monkeypatches process.stdout.readline to pull from its own queue
+        # but we also support an attribute rtl_queue on the parent (set by test fixtures)
+        self._external_queue = getattr(parent, "rtl_queue", None)
 
     def run(self):
 
@@ -263,26 +267,32 @@ class MainThread(threading.Thread):
                     process_json(next(mock_generator), self.parent)
             else:
                 while not self.getout:
-                    ready, _, _ = select.select(
-                        [self.process.stdout], [], [], 1
-                    )  # 1-second timeout
-                    if ready:
-                        line = self.process.stdout.readline()
-                        if not line and not self.getout:
-                            self.parent.log.warning(
-                                "rtl_433 exited unexpectedly. Restarting..."
-                            )
-                            self.process = start_rtl_433(
-                                self.parent,
-                                device=device,
-                                frequency=frequency,
-                                decoders=decoders,
-                            )
-                            continue
-                        process_json(line.strip(), self.parent)
-                    else:
+                    # Fast path: if an external queue was injected by tests, drain it first
+                    if self._external_queue is not None and not self._external_queue.empty():
+                        try:
+                            line = self._external_queue.get_nowait()
+                            if line:
+                                process_json(line.strip(), self.parent)
+                                continue
+                        except Exception:
+                            pass
+                    ready, _, _ = select.select([self.process.stdout], [], [], 0.25)
+                    if not ready:
                         continue
-                        # self.parent.log.info("Warning: rtl_433 is not producing output.")
+                    line = self.process.stdout.readline()
+                    if not line and not self.getout:
+                        self.parent.log.warning(
+                            "rtl_433 exited unexpectedly. Restarting..."
+                        )
+                        self.process = start_rtl_433(
+                            self.parent,
+                            device=device,
+                            frequency=frequency,
+                            decoders=decoders,
+                        )
+                        continue
+                    if line:
+                        process_json(line.strip(), self.parent)
                 self.stop_rtl_433()
         finally:
             self.stop_rtl_433()

@@ -752,10 +752,15 @@ class MainThread(threading.Thread):
         count = 0
         script_count = -1
         script_when = -1
+        last_tick = time.time()
         while not self.getout:
             count += 1
             script_when += 1
+            # Sleep for nominal dt then compute actual elapsed time to reduce timing drift
             time.sleep(self._tick_dt)
+            now_tick = time.time()
+            actual_dt = max(0.0, now_tick - last_tick)
+            last_tick = now_tick
             touched = set()
 
             # print(f"script_when:{script_when}, script_count:{script_count}")
@@ -791,8 +796,8 @@ class MainThread(threading.Thread):
 
             # Continuous engine simulation updates every tick
             self._update_engine(touched)
-            # Optional fuel drain simulation every tick
-            self._update_fuel(touched, dt=self._tick_dt)
+            # Optional fuel drain simulation every tick using actual elapsed time
+            self._update_fuel(touched, dt=actual_dt)
                     
             for each in self.keylist:
                 if each in touched:
