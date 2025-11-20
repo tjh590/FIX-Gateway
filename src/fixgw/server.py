@@ -327,8 +327,8 @@ def main_setup():
 
     # run through the plugin_list dict and find all the plugins that are
     # configured to be loaded and load them.
-    print(args.playback_start_time)
     if args.playback_start_time:
+        print(args.playback_start_time)
         # We are in playback mode, if logs for the time provided exist we will play them back
         for each in config["connections"]:
             if config["connections"][each]["module"] == "fixgw.plugins.data_recorder":
