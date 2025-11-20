@@ -9,7 +9,7 @@ agent*.md
 doc/_*
 .ropeproject/*
 .directory
-config/
+/config/
 init.marker
 venv.marker
 
