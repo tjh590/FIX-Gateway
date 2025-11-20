@@ -188,4 +188,49 @@ items:
   tol: 2000
   aux: [Min,Max,lowWarn,highWarn,lowAlarm,highAlarm]
 
+# The variables.yaml file defines 1 engine and 6 cylinders
+# This allows 12 items (EGTx6 and CHTx6) which can be used for horizontal and vertical bar testing and demo use
+# 4 more items are required in order to have a complete set for bar testing (total of 16 required to cover all lo/hi warn/alarm cases)
+# Define them below
+
+- key: BARTEST1
+  description: Additional item for bar testing
+  type: float
+  min: 0.0
+  max: 1000.0
+  units: degC
+  initial: 0.0
+  tol: 2000
+  aux: [Min,Max,lowWarn,highWarn,lowAlarm,highAlarm]
+
+- key: BARTEST2
+  description: Additional item for bar testing
+  type: float
+  min: 0.0
+  max: 1000.0
+  units: degC
+  initial: 0.0
+  tol: 2000
+  aux: [Min,Max,lowWarn,highWarn,lowAlarm,highAlarm]
+
+- key: BARTEST3
+  description: Additional item for bar testing
+  type: float
+  min: 0.0
+  max: 1000.0
+  units: degC
+  initial: 0.0
+  tol: 2000
+  aux: [Min,Max,lowWarn,highWarn,lowAlarm,highAlarm]
+
+- key: BARTEST4
+  description: Additional item for bar testing
+  type: float
+  min: 0.0
+  max: 1000.0
+  units: degC
+  initial: 0.0
+  tol: 2000
+  aux: [Min,Max,lowWarn,highWarn,lowAlarm,highAlarm]
+
 

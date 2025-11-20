@@ -26,6 +26,7 @@
 import threading
 import time
 import math
+import os
 from collections import OrderedDict
 import fixgw.plugin as plugin
 
@@ -55,10 +56,14 @@ class MainThread(threading.Thread):
             "CHT12": 202.0,
             "CHT13": 199.0,
             "CHT14": 200.0,
+            "CHT15": 197.0,
+            "CHT16": 196.0,
             "EGT11": 510.0,
             "EGT12": 540.0,
             "EGT13": 544.0,
             "EGT14": 522.0,
+            "EGT15": 500.0,
+            "EGT16": 550.0,
             "FUELF1": 8.7,
             "VOLT": 13.7,
             "CURRNT": 45.6,
@@ -314,10 +319,14 @@ class MainThread(threading.Thread):
                 "CHT12": 100,
                 "CHT13": 100,
                 "CHT14": 100,
+                "CHT15": 100,
+                "CHT16": 100,
                 "EGT11": 500,
                 "EGT12": 500,
                 "EGT13": 500,
                 "EGT14": 500,
+                "EGT15": 500,
+                "EGT16": 500,
                 "FUELQ1": 21,
                 "FUELQ2": 21,
                 "FUELQ3": 42,
@@ -329,10 +338,14 @@ class MainThread(threading.Thread):
                 "CHT12": 150,
                 "CHT13": 150,
                 "CHT14": 150,
+                "CHT15": 150,
+                "CHT16": 150,
                 "EGT11": 550,
                 "EGT12": 550,
                 "EGT13": 550,
                 "EGT14": 550,
+                "EGT15": 550,
+                "EGT16": 550,
                 "FUELQ1": 18,
                 "FUELQ2": 17,
                 "FUELQ3": 38,
@@ -344,10 +357,14 @@ class MainThread(threading.Thread):
                 "CHT12": 200,
                 "CHT13": 200,
                 "CHT14": 200,
+                "CHT15": 200,
+                "CHT16": 200,
                 "EGT11": 600,
                 "EGT12": 600,
                 "EGT13": 600,
                 "EGT14": 600,
+                "EGT15": 600,
+                "EGT16": 600,
                 "FUELQ1": 15,
                 "FUELQ2": 15,
                 "FUELQ3": 30,
@@ -359,10 +376,14 @@ class MainThread(threading.Thread):
                 "CHT12": 250,
                 "CHT13": 250,
                 "CHT14": 200,
+                "CHT15": 200,
+                "CHT16": 200,
                 "EGT11": 650,
                 "EGT12": 650,
                 "EGT13": 650,
                 "EGT14": 650,
+                "EGT15": 650,
+                "EGT16": 650,
                 "FUELQ1": 10,
                 "FUELQ2": 11,
                 "FUELQ3": 20,
@@ -374,10 +395,14 @@ class MainThread(threading.Thread):
                 "CHT12": 300,
                 "CHT13": 300,
                 "CHT14": 200,
+                "CHT15": 200,
+                "CHT16": 200,
                 "EGT11": 680,
                 "EGT12": 680,
                 "EGT13": 680,
                 "EGT14": 680,
+                "EGT15": 680,
+                "EGT16": 680,
                 "FUELQ1": 5,
                 "FUELQ2": 6,
                 "FUELQ3": 10,
@@ -389,10 +414,14 @@ class MainThread(threading.Thread):
                 "CHT12": 320,
                 "CHT13": 320,
                 "CHT14": 200,
+                "CHT15": 200,
+                "CHT16": 200,
                 "EGT11": 750,
                 "EGT12": 750,
                 "EGT13": 750,
                 "EGT14": 750,
+                "EGT15": 750,
+                "EGT16": 750,
                 "FUELQ1": 0,
                 "FUELQ2": 0,
                 "FUELQ3": 0,
@@ -404,10 +433,14 @@ class MainThread(threading.Thread):
                 "CHT12": 320,
                 "CHT13": 320,
                 "CHT14": 200,
+                "CHT15": 200,
+                "CHT16": 200,
                 "EGT11": 750,
                 "EGT12": 750,
                 "EGT13": 750,
                 "EGT14": 750,
+                "EGT15": 750,
+                "EGT16": 750,
                 "FUELQ1": 0,
                 "FUELQ2": 0,
                 "FUELQ3": 0,
@@ -419,10 +452,14 @@ class MainThread(threading.Thread):
                 "CHT12": 300,
                 "CHT13": 300,
                 "CHT14": 200,
+                "CHT15": 200,
+                "CHT16": 200,
                 "EGT11": 680,
                 "EGT12": 680,
                 "EGT13": 680,
                 "EGT14": 680,
+                "EGT15": 680,
+                "EGT16": 680,
                 "FUELQ1": 5,
                 "FUELQ2": 6,
                 "FUELQ3": 10,
@@ -434,10 +471,14 @@ class MainThread(threading.Thread):
                 "CHT12": 250,
                 "CHT13": 250,
                 "CHT14": 200,
+                "CHT15": 200,
+                "CHT16": 200,
                 "EGT11": 650,
                 "EGT12": 650,
                 "EGT13": 650,
                 "EGT14": 650,
+                "EGT15": 650,
+                "EGT16": 650,
                 "FUELQ1": 10,
                 "FUELQ2": 11,
                 "FUELQ3": 20,
@@ -449,10 +490,14 @@ class MainThread(threading.Thread):
                 "CHT12": 200,
                 "CHT13": 200,
                 "CHT14": 200,
+                "CHT15": 200,
+                "CHT16": 200,
                 "EGT11": 600,
                 "EGT12": 600,
                 "EGT13": 600,
                 "EGT14": 600,
+                "EGT15": 600,
+                "EGT16": 600,
                 "FUELQ1": 15,
                 "FUELQ2": 15,
                 "FUELQ3": 30,
@@ -464,10 +509,14 @@ class MainThread(threading.Thread):
                 "CHT12": 150,
                 "CHT13": 150,
                 "CHT14": 150,
+                "CHT15": 150,
+                "CHT16": 150,
                 "EGT11": 550,
                 "EGT12": 550,
                 "EGT13": 550,
                 "EGT14": 550,
+                "EGT15": 550,
+                "EGT16": 550,
                 "FUELQ1": 18,
                 "FUELQ2": 17,
                 "FUELQ3": 38,
@@ -478,10 +527,14 @@ class MainThread(threading.Thread):
                 "CHT12": 90,
                 "CHT13": 120,
                 "CHT14": 101,
+                "CHT15": 105,
+                "CHT16": 80,
                 "EGT11": 490,
                 "EGT12": 510,
                 "EGT13": 501,
                 "EGT14": 500,
+                "EGT15": 515,
+                "EGT16": 520,
                 "FUELQ1": 5,
                 "FUELQ2": 11,
                 "FUELQ3": 42,
@@ -660,8 +713,27 @@ class MainThread(threading.Thread):
             self.engine_keys.add(f"EGT1{i}")
             self.engine_keys.add(f"CHT1{i}")
 
+        # Supports {CONFIG} placeholder like server-level initialization files
+        _cfg = getattr(self.parent, "config", {})
+        inifile_template = _cfg.get("initialization_file")  # e.g. "{CONFIG}/init_data/engines/forDemo.ini"
+        self._initialization_file = None
+        if inifile_template:
+            cfg_path = _cfg.get("CONFIGPATH", "")  # injected by loader
+            try:
+                inipath = inifile_template.format(CONFIG=cfg_path)
+            except KeyError:
+                # If placeholder missing, use raw template
+                inipath = inifile_template
+            if os.path.isfile(inipath):
+                self._initialization_file = inipath
+            else:
+                self.log.error("Initialization file not found: %s", inipath)
+        else:
+            self.log.error("Missing required 'initialization_file' element in demo plugin .yaml file")
+
         # Continuous engine simulation parameters
         self._engine_start = time.time()
+
         # State for slow-moving temps
         self._oilt = self.keylist.get("OILT1", 90.0)
         self._cht = {}
@@ -669,6 +741,7 @@ class MainThread(threading.Thread):
         for i in self.cylinders:
             self._cht[f"CHT1{i}"] = self.keylist.get(f"CHT1{i}", 200.0)
             self._egt[f"EGT1{i}"] = self.keylist.get(f"EGT1{i}", 650.0)
+            
         # Independent phases so cylinders aren't identical
         self._phase = {}
         # Assign phase offsets evenly around a circle for variability
@@ -678,19 +751,45 @@ class MainThread(threading.Thread):
                 base_phase = (idx / len(self.cylinders)) * 2.0 * math.pi
                 self._phase[f"EGT1{cyl}"] = base_phase
                 self._phase[f"CHT1{cyl}"] = base_phase * 0.5  # slower differing phase
-        # Initialize the points
+
+        # Initialize the points from keylist
         for each in self.keylist:
             self.parent.db_write(each, self.keylist[each])
 
         # Configuration for engine simulation and fuel drain
         self._cfg_engine = getattr(self.parent, "config", {}).get("engine_sim", {})
+        self._engine_sim_enabled = bool(self._cfg_engine.get("enabled", False))
+
         self._cfg_fuel = getattr(self.parent, "config", {}).get("fuel_drain", {})
+        self._fuel_enabled = bool(self._cfg_fuel.get("enabled", False))
+
+        # Apply overrides from initialization file (after keylist so overrides win)
+        if self._engine_sim_enabled:
+            try:
+                with open(self._initialization_file, "r") as f:
+                    for raw in f:
+                        line = raw.strip()
+                        if not line or line.startswith("#"):
+                            continue
+                        parts = line.split("=")
+                        if len(parts) < 2:
+                            continue
+                        key = parts[0].strip()
+                        value = parts[1].strip()
+                        # Use plugin db_write so aux (key.Aux) handled by database.write
+                        try:
+                            self.parent.db_write(key, value)
+                        except Exception as e:
+                            self.log.error("Init file write failed for %s: %s", key, e)
+            except Exception as e:
+                self.log.error("Failed reading initialization file %s: %s", self._initialization_file, e)
 
         # General timing configuration
         cfg = getattr(self.parent, "config", {})
         self._tick_hz = float(cfg.get("tick_rate_hz", 10.0))
         if self._tick_hz <= 0:
             self._tick_hz = 10.0
+        
         self._tick_dt = 1.0 / self._tick_hz
         self._segment_steps = int(cfg.get("segment_steps", 20))
         if self._segment_steps < 1:
@@ -732,8 +831,14 @@ class MainThread(threading.Thread):
         self._cht_oilt_coeff = float(self._cfg_engine.get("cht_oilt_coeff", 0.05))
         self._cht_alpha = float(self._cfg_engine.get("cht_alpha", 0.02))
 
-        # Fuel drain configuration
-        self._fuel_enabled = bool(self._cfg_fuel.get("enabled", False))
+        # Optional full sweep configuration
+        # full_sweep: if True, override normal sinusoid CHT/EGT calcs and BARTEST sweeps
+        # full_sweep_period: seconds for one min->max or max->min transition (half triangular wave)
+        self._full_sweep = bool(self._cfg_engine.get("full_sweep", False))
+        self._full_sweep_period = float(self._cfg_engine.get("full_sweep_period", 10.0))
+        if self._full_sweep_period <= 0.0:
+            self._full_sweep_period = 10.0
+
         # Tanks to drain; default to detected FUELQ1..FUELQ3 in keylist order
         default_tanks = [k for k in ["FUELQ1", "FUELQ2", "FUELQ3", "FUELQ4"] if k in self.keylist]
         self._fuel_tanks = list(self._cfg_fuel.get("tanks", default_tanks))
@@ -796,6 +901,7 @@ class MainThread(threading.Thread):
 
             # Continuous engine simulation updates every tick
             self._update_engine(touched)
+
             # Optional fuel drain simulation every tick using actual elapsed time
             self._update_fuel(touched, dt=actual_dt)
                     
@@ -819,6 +925,9 @@ class MainThread(threading.Thread):
         """Continuously update engine-related keys to avoid long flat periods.
         Generates smooth variations using simple sinusoids and slow integrators.
         """
+        if not self._engine_sim_enabled:
+            return
+
         now = time.time()
         t = now - self._engine_start
         # RPM around mean ± amp with configured period
@@ -834,21 +943,81 @@ class MainThread(threading.Thread):
         target_oilt = self._oilt_base + self._oilt_rpm_coeff * (rpm - self._rpm_mean) + self._oilt_sin_amp * math.sin(2.0 * math.pi * (t / max(1e-6, self._oilt_sin_period)))
         self._oilt += (target_oilt - self._oilt) * self._oilt_alpha  # slow approach
 
-        # Cylinder/EGT temps per cylinder with phase offsets
-        for cyl in self.cylinders:
-            egt_key = f"EGT1{cyl}"
-            cht_key = f"CHT1{cyl}"
-            phase_egt = self._phase.get(egt_key, 0.0)
-            phase_cht = self._phase.get(cht_key, 0.0)
-            egt = self._egt_base + self._egt_amp * math.sin(2.0 * math.pi * (t / max(1e-6, self._egt_period)) + phase_egt)
-            target_cht = self._cht_base + self._cht_amp * math.sin(2.0 * math.pi * (t / max(1e-6, self._cht_period)) + phase_cht) + self._cht_oilt_coeff * (self._oilt - self._oilt_base)
-            self._cht[cht_key] += (target_cht - self._cht[cht_key]) * self._cht_alpha
-            if egt_key in self.engine_keys:
-                self.parent.db_write(egt_key, egt)
-                touched.add(egt_key)
-            if cht_key in self.engine_keys:
-                self.parent.db_write(cht_key, self._cht[cht_key])
-                touched.add(cht_key)
+        if self._full_sweep:
+            # Triangular wave between aux min/max for specified keys.
+            # One half-period (min->max or max->min) = self._full_sweep_period
+            # Full cycle (min->max->min) = 2 * self._full_sweep_period
+            sweep_t = (t % (2.0 * self._full_sweep_period))
+            ascending = sweep_t < self._full_sweep_period
+            pos = sweep_t if ascending else (sweep_t - self._full_sweep_period)
+            frac = pos / self._full_sweep_period  # 0..1 over a half sweep
+
+            def sweep_value(item_key):
+                try:
+                    itm = self.parent.db_get_item(item_key)
+                except Exception:
+                    return None
+                # Prefer aux Min/Max if present else fall back to item min/max
+                aux_min = None
+                aux_max = None
+                try:
+                    aux_min = itm.get_aux_value("Min")
+                except Exception:
+                    pass
+                try:
+                    aux_max = itm.get_aux_value("Max")
+                except Exception:
+                    pass
+                lo = aux_min if isinstance(aux_min, (int, float)) else itm.min
+                hi = aux_max if isinstance(aux_max, (int, float)) else itm.max
+                # If bounds unavailable, return None to signal fallback
+                if lo is None or hi is None:
+                    return None
+                span = hi - lo
+                if span == 0:
+                    return lo
+                val = lo + span * (frac if ascending else (1.0 - frac))
+                return val
+
+            # Sweep CHT1-6, EGT1-6 if they exist
+            for cyl in self.cylinders:
+                if cyl > 6:
+                    continue  # per request limit to 1-6
+                egt_key = f"EGT1{cyl}"
+                cht_key = f"CHT1{cyl}"
+                for key in (egt_key, cht_key):
+                    if key in self.engine_keys:
+                        v = sweep_value(key)
+                        if v is not None:
+                            self.parent.db_write(key, v)
+                            touched.add(key)
+            # Sweep BARTEST1-4 if present
+            for bar in range(1, 5):
+                bar_key = f"BARTEST{bar}"
+                try:
+                    self.parent.db_get_item(bar_key)
+                except Exception:
+                    continue
+                v = sweep_value(bar_key)
+                if v is not None:
+                    self.parent.db_write(bar_key, v)
+                    touched.add(bar_key)
+        else:
+            # Cylinder/EGT temps per cylinder with phase offsets (original behavior)
+            for cyl in self.cylinders:
+                egt_key = f"EGT1{cyl}"
+                cht_key = f"CHT1{cyl}"
+                phase_egt = self._phase.get(egt_key, 0.0)
+                phase_cht = self._phase.get(cht_key, 0.0)
+                egt = self._egt_base + self._egt_amp * math.sin(2.0 * math.pi * (t / max(1e-6, self._egt_period)) + phase_egt)
+                target_cht = self._cht_base + self._cht_amp * math.sin(2.0 * math.pi * (t / max(1e-6, self._cht_period)) + phase_cht) + self._cht_oilt_coeff * (self._oilt - self._oilt_base)
+                self._cht[cht_key] += (target_cht - self._cht[cht_key]) * self._cht_alpha
+                if egt_key in self.engine_keys:
+                    self.parent.db_write(egt_key, egt)
+                    touched.add(egt_key)
+                if cht_key in self.engine_keys:
+                    self.parent.db_write(cht_key, self._cht[cht_key])
+                    touched.add(cht_key)
 
         # Fuel pressure follows fuel flow weakly with small ripple
         fuelp = 28.0 + 0.5 * math.sin(2.0 * math.pi * (t / 35.0)) + 0.02 * (fuelf - self._fuelf_base)

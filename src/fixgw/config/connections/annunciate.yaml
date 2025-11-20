@@ -33,15 +33,21 @@ annunciate:
       cond_bypass: TACH1 < 500
       deadband: 2
 
+    # support 6 cylinders now
     - key: CHT11
     - key: CHT12
     - key: CHT13
     - key: CHT14
+    - key: CHT15
+    - key: CHT16
 
+    # support 6 cylinders now
     - key: EGT11
     - key: EGT12
     - key: EGT13
     - key: EGT14
+    - key: EGT15
+    - key: EGT16
 
     - key: CURRNT
     - key: VOLT

@@ -109,13 +109,26 @@ class DB_Item(object):
                 if self.aux[name] != last:
                     if self.auxChanged is not None:
                         self.auxChanged(name, value)
-                    if not self.supressWrite:
-                        res = self.client.writeValue(
-                            "{}.{}".format(self.key, name), self.aux[name]
-                        )
-                        if "!" in res:
-                            # TODO: Should probably report the error???
-                            return
+                    # Only write non-None aux values to the server. Sending a
+                    # '@w key.aux;None' currently causes the server to ignore
+                    # the request and the client blocks waiting for a response,
+                    # triggering a timeout. Treat 'None' as a local-only state
+                    # (disabled threshold) until protocol support for deletion
+                    # is added.
+                    if self.aux[name] is not None and not self.supressWrite:
+                        try:
+                            res = self.client.writeValue(
+                                f"{self.key}.{name}", self.aux[name]
+                            )
+                            if "!" in res:
+                                # TODO: Report error to caller/UI if needed.
+                                return
+                        except Exception:
+                            # Log and continue; failure to propagate aux value
+                            # shouldn't break UI interaction.
+                            log.debug(
+                                "Failed to write aux value %s.%s=%s", self.key, name, self.aux[name]
+                            )
             except ValueError:
                 log.error("Bad Value for aux {0} {1}".format(name, value))
                 raise

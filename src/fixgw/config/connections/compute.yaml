@@ -4,16 +4,16 @@ compute:
   module: fixgw.plugins.compute
   functions:
     - function: average
-      inputs: ["EGT11", "EGT12", "EGT13", "EGT14"]
+      inputs: ["EGT11", "EGT12", "EGT13", "EGT14", "EGT15", "EGT16"]
       output: EGTAVG1
     - function: span
-      inputs: ["EGT11", "EGT12", "EGT13", "EGT14"]
+      inputs: ["EGT11", "EGT12", "EGT13", "EGT14", "EGT15", "EGT16"]
       output: EGTSPAN1
     - function: max
-      inputs: ["EGT11", "EGT12", "EGT13", "EGT14"]
+      inputs: ["EGT11", "EGT12", "EGT13", "EGT14", "EGT15", "EGT16"]
       output: EGTMAX1
     - function: max
-      inputs: ["CHT11", "CHT12", "CHT13", "CHT14"]
+      inputs: ["CHT11", "CHT12", "CHT13", "CHT14", "CHT15", "CHT16"]
       output: CHTMAX1
     - function: sum
       inputs: ["FUELQ1", "FUELQ2", "FUELQ3"]
